@@ -225,6 +225,33 @@ si Blender n'est pas trouvé ; le chemin peut aussi être mis dans `studio.json`
 
 Le retarget marche avec n'importe quelle animation au squelette Mixamo, pas seulement MocapCam.
 
+### 3ds Max : transférer l'animation sur un Biped
+
+Le script `3dsmax/MocapCam_Biped.ms` transfère une animation au squelette Mixamo (le FBX
+MocapCam, ou n'importe quelle animation Mixamo) sur un **Biped** natif de 3ds Max.
+
+1. Dans 3ds Max, importez le FBX (*Fichier > Importer*) : le squelette `mixamorig:…` arrive
+   avec son animation. Ayez votre Biped dans la scène (avec ou sans personnage skinné).
+2. Glissez `MocapCam_Biped.ms` dans une fenêtre 3ds Max (ou *Script > Exécuter le script…*).
+3. *Choisir un os du squelette Mixamo* : cliquez n'importe quel os de l'animation.
+   *Choisir le Biped* : cliquez n'importe quelle partie du Biped.
+4. Vérifiez la plage d'images, puis **Transférer l'animation**.
+
+* Le Biped garde sa morphologie (taille, proportions, T-pose ou A-pose en mode Figure) :
+  chaque os prend la direction de l'os Mixamo correspondant et la torsion de l'animation ;
+  le déplacement est mis à l'échelle de ses jambes. Pas besoin de T-pose dans l'animation.
+* Coudes, genoux et phalanges du Biped ne plient que dans un axe : le script place le plan du
+  bras et de la jambe dans celui de l'animation, et borne les phalanges (pas de doigt retourné).
+* Nombre de vertèbres, de phalanges et de doigts quelconque ; idéal : colonne 3, cou 1,
+  doigts 5 × 3, orteils 1 (comme Mixamo).
+* *Partir de la position actuelle du Biped* : décoché, le Biped se place là où est le
+  squelette Mixamo.
+* Le Biped est animé en mode libre (clé à chaque image), sans pas : effacez ses pas avant.
+
+`Tester le script Biped.bat` vérifie le script sans ouvrir 3ds Max : il importe
+`captures\prise_006\prise_006.fbx`, crée deux Biped, fait le transfert et écrit les mesures
+dans `3dsmax\test\resultat.txt`.
+
 ## 9. Réglages avancés (`studio.json`)
 
 | Clé | Rôle |
