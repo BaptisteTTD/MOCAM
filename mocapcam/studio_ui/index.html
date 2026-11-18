@@ -309,6 +309,11 @@
 <script>
 let ws, S = null, serverDelta = 0, takeTyped = false, selTake = null, logText = '';
 const UI_VERSION = '1.2.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
+function newerVersion(a, b) {
+  const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  return false;
+}
 function fatal(title, detail) { $('fatalT').textContent = title; $('fatalD').textContent = detail; $('fatal').style.display = 'flex'; }
 // aperçu 3D : remplacé par le module three.js dès qu'il est chargé
 window.mcViewer = window.mcViewer || { show() {}, toggle() { return true; }, seek() {} };
@@ -328,8 +333,14 @@ function connect() {
     if (m.type === 'state') {
       S = m; serverDelta = m.now - Date.now();
       if (S.version !== UI_VERSION) {
+        // serveur plus récent que cette page : on recharge la page (une fois), elle sera à jour
+        if (S.version && newerVersion(S.version, UI_VERSION)) {
+          let last = 0;
+          try { last = +sessionStorage.getItem('mcReload') || 0; sessionStorage.setItem('mcReload', String(Date.now())); } catch (e) { /* stockage indisponible */ }
+          if (Date.now() - last > 30000) { location.reload(); return; }
+        }
         fatal('MocapCam Studio doit être relancé',
-              `Cette fenêtre est d'une version plus récente (${UI_VERSION}) que le serveur qui tourne encore (${S.version || 'ancienne version'}).\n\nFermez la fenêtre noire « MocapCam Studio », puis relancez MocapCam Studio.bat.`);
+              `Cette fenêtre (version ${UI_VERSION}) ne correspond pas au serveur qui tourne (${S.version || 'ancienne version'}).\n\nRelancez MocapCam Studio.bat : l'ancien serveur est fermé et remplacé tout seul.`);
         return;
       }
       $('fatal').style.display = 'none';
@@ -475,6 +486,7 @@ function stateFr(s) { return ({ armed: 'prêt', recording: 'enregistre', uploadi
 
 function addCard() {
   const n = S.net || {};
+  const hs = n.hotspot && n.hotspot.on;
   const real = (n.adapters || []).length;
   let alert = '';
   if (n.public && n.firewall_rule === false)
@@ -485,7 +497,7 @@ function addCard() {
     <div>
       <h3>${S.cams.length ? 'Ajouter un autre téléphone' : 'Connecter les téléphones'}</h3>
       <ol>
-        <li>Mettez le téléphone sur ${n.ssid ? `le Wi-Fi <b>${esc(n.ssid)}</b>` : 'le même réseau que ce PC'}. Le partage de connexion d'un des téléphones marche aussi : branchez-y le PC.</li>
+        <li>Mettez le téléphone sur ${n.ssid ? `le Wi-Fi <b>${esc(n.ssid)}</b>` : 'le même réseau que ce PC'}${hs ? `${n.ssid ? ',' : ''} ou sur le point d'accès de ce PC${n.hotspot.ssid ? ` <b>${esc(n.hotspot.ssid)}</b>` : ''}` : ''}. Le partage de connexion d'un des téléphones marche aussi : connectez-y le PC.</li>
         <li>Ouvrez l'app <b>MocapCam</b> et donnez un nom à la caméra.</li>
         <li>Scannez ce code.</li>
       </ol>
@@ -721,7 +733,7 @@ function render() {
   $('nChars').textContent = S.characters.length ? S.characters.length : '';
   const n = S.net || {};
   const st = S.cams.length >= 2 ? 'ok' : S.cams.length ? 'warn' : 'err';
-  $('net').innerHTML = `<span class="dot ${(n.adapters || []).length ? (n.public && n.firewall_rule === false ? 'warn' : 'ok') : 'err'}"></span>${n.ssid ? `Wi-Fi <b>${esc(n.ssid)}</b>` : (n.adapters || []).length ? 'Réseau filaire' : 'Pas de réseau'}<span class="dot ${st}" style="margin-left:10px"></span>${S.cams.length} caméra${S.cams.length > 1 ? 's' : ''}`;
+  $('net').innerHTML = `<span class="dot ${(n.adapters || []).length ? (n.public && n.firewall_rule === false ? 'warn' : 'ok') : 'err'}"></span>${n.ssid ? `Wi-Fi <b>${esc(n.ssid)}</b>` : n.hotspot && n.hotspot.on ? 'Point d\'accès du PC' : (n.adapters || []).length ? 'Réseau filaire' : 'Pas de réseau'}<span class="dot ${st}" style="margin-left:10px"></span>${S.cams.length} caméra${S.cams.length > 1 ? 's' : ''}`;
   $('netDetail').innerHTML = (n.adapters || []).map(a => `${esc(a.name)} : ${esc(a.ip)}`).join('<br>') + (n.public ? '<br><span class="warn-t">Réseau classé public par Windows</span>' : '') + (n.firewall_rule ? '<br><span class="ok-t">Règle de pare-feu MocapCam active</span>' : '');
   $('paths').textContent = `Prises : ${S.captures}`;
   if (document.activeElement !== $('p60')) $('p60').checked = !!S.prefer60;

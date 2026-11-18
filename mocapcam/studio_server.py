@@ -74,29 +74,70 @@ def _run(cmd, timeout=6):
 
 
 def windows_adapters():
-    """[(carte réseau, adresse IPv4)] d'après ipconfig (Windows)."""
-    rc, out = _run(["ipconfig"])
-    res, adapter = [], ""
+    """[(carte réseau, description, adresse IPv4)] d'après ipconfig /all (Windows)."""
+    rc, out = _run(["ipconfig", "/all"])
+    res, adapter, desc = [], "", ""
     for line in out.splitlines():
         if line and not line[0].isspace() and line.rstrip().endswith(":"):
-            adapter = line.strip().rstrip(":").strip()
+            adapter, desc = line.strip().rstrip(":").strip(" \xa0\ufffd"), ""
+        elif "Description" in line and ":" in line:
+            desc = line.split(":", 1)[1].strip()
         elif "IPv4" in line:
             m = re.search(r"(\d+\.\d+\.\d+\.\d+)", line)
             if m:
-                res.append((adapter, m.group(1)))
+                res.append((adapter, desc, m.group(1)))
     return res
 
 
+def windows_hotspot():
+    """Point d'accès mobile de Windows (le PC partage sa connexion) : {on, ssid}, ou None si inconnu."""
+    ps = ("$p=[Windows.Networking.Connectivity.NetworkInformation,Windows.Networking.Connectivity,"
+          "ContentType=WindowsRuntime]::GetInternetConnectionProfile();"
+          "$m=[Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager,"
+          "Windows.Networking.NetworkOperators,ContentType=WindowsRuntime]::CreateFromConnectionProfile($p);"
+          "Write-Output $m.TetheringOperationalState.ToString();"
+          "Write-Output $m.GetCurrentAccessPointConfiguration().Ssid")
+    rc, out = _run(["powershell", "-NoProfile", "-Command", ps], timeout=10)
+    lines = [x.strip() for x in out.strip().splitlines() if x.strip()]
+    if rc != 0 or not lines or lines[0] not in ("On", "Off", "InTransition", "Unknown"):
+        return None
+    return dict(on=lines[0] == "On", ssid=lines[1] if len(lines) > 1 else None)
+
+
+def _adapter_kind(name, desc):
+    t = f"{name} {desc}".lower()
+    if "wi-fi direct" in t or "hosted network" in t:
+        return "hotspot"                       # carte du point d'accès mobile de Windows
+    if any(v in t for v in VIRTUAL_ADAPTERS):
+        return "virtual"
+    return "wifi" if any(w in t for w in WIFI_WORDS) else "wired"
+
+
+def _adapter_label(kind, name):
+    if kind == "hotspot":
+        return "Point d'accès mobile du PC"
+    n = re.sub(r"^(Carte (Ethernet|réseau sans fil|r.seau sans fil)|Ethernet adapter|Wireless LAN adapter)\s+",
+               "", name, flags=re.I)
+    return n or name
+
+
 def network_info(port=8765):
-    """Adresses du PC (Wi-Fi d'abord, cartes virtuelles exclues), nom du Wi-Fi, profil réseau
-    Windows (public = pare-feu plus strict) et règle de pare-feu MocapCam."""
-    info = dict(hosts=[], ssid=None, public=False, firewall_rule=None, adapters=[])
+    """Adresses du PC (Wi-Fi d'abord, cartes virtuelles exclues), nom du Wi-Fi, point d'accès mobile
+    du PC, profil réseau Windows (public = pare-feu plus strict) et règle de pare-feu MocapCam."""
+    info = dict(hosts=[], ssid=None, public=False, firewall_rule=None, adapters=[], hotspot=None)
     if sys.platform.startswith("win"):
-        ad = [(a, ip) for a, ip in windows_adapters() if not ip.startswith(("127.", "169.254."))]
-        real = [(a, ip) for a, ip in ad if not any(v in a.lower() for v in VIRTUAL_ADAPTERS)]
-        real.sort(key=lambda x: (0 if any(w in x[0].lower() for w in WIFI_WORDS) else 1))
-        info["adapters"] = [dict(name=a, ip=ip) for a, ip in real]
-        info["hosts"] = [ip for _, ip in real] or [ip for _, ip in ad]
+        ad = [x for x in windows_adapters() if not x[2].startswith(("127.", "169.254."))]
+        hs = windows_hotspot()
+        info["hotspot"] = hs
+        real = []
+        for name, desc, ip in ad:
+            k = _adapter_kind(name, desc)
+            if k == "virtual" or (k == "hotspot" and hs is not None and not hs["on"]):
+                continue                       # VirtualBox, VPN… ou point d'accès éteint
+            real.append((k, name, ip))
+        real.sort(key=lambda x: {"wifi": 0, "hotspot": 1, "wired": 2}[x[0]])
+        info["adapters"] = [dict(name=_adapter_label(k, n), ip=ip, kind=k) for k, n, ip in real]
+        info["hosts"] = [ip for _, _, ip in real] or [x[2] for x in ad]
         rc, out = _run(["netsh", "wlan", "show", "interfaces"])
         m = re.search(r"^\s*SSID\s*:\s*(.+?)\s*$", out, re.M)
         if m:
@@ -317,7 +358,8 @@ class Studio:
             processing=proc, queue=[dict(kind=j["kind"], take=j["take"], label=j["label"]) for j in self.queue],
             qr=q, qr_key=hashlib.sha1(json.dumps(q, sort_keys=True).encode()).hexdigest()[:12],
             net=dict(ssid=self.net.get("ssid"), public=self.net.get("public"),
-                     firewall_rule=self.net.get("firewall_rule"), adapters=self.net.get("adapters", [])),
+                     firewall_rule=self.net.get("firewall_rule"), adapters=self.net.get("adapters", []),
+                     hotspot=self.net.get("hotspot")),
             now=now_ms(), studio=self.studio_dir, captures=self.captures_dir,
             prefer60=self.prefer60, preview_fps=self.preview_fps,
             actor_height_cm=cfg.get("actor_height_cm"),
