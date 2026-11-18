@@ -5,6 +5,8 @@
   python -m mocapcam marqueurs   STUDIO DOSSIER_PRISE
   python -m mocapcam traiter     STUDIO DOSSIER_PRISE [--force] [--decalage poco=0.12]
   python -m mocapcam fbx         DOSSIER_PRISE [--blender CHEMIN] [--absolu]
+  python -m mocapcam taille      DOSSIER_PRISE TAILLE_CM      (prise déjà traitée)
+  python -m mocapcam animer      STUDIO DOSSIER_PRISE PERSONNAGE  (personnage de studio/personnages)
 """
 import argparse
 import os
@@ -51,6 +53,18 @@ def main(argv=None):
     p.add_argument("--absolu", action="store_true",
                    help="garder la position dans la zone de capture (sinon le perso part de l'origine)")
 
+    p = sub.add_parser("taille", help="met une prise traitée à la taille de l'acteur (cm), recrée le FBX")
+    p.add_argument("capture", help="dossier de la prise (déjà traitée)")
+    p.add_argument("cm", type=float, help="taille de l'acteur en cm, ex. 178")
+    p.add_argument("--studio", default=os.path.join(ROOT, "studio"))
+    p.add_argument("--blender", help="chemin de blender.exe (sinon studio.json ou recherche automatique)")
+
+    p = sub.add_parser("animer", help="anime un personnage riggé avec une prise traitée")
+    p.add_argument("studio")
+    p.add_argument("capture")
+    p.add_argument("personnage", help="identifiant du personnage (dossier de studio/personnages)")
+    p.add_argument("--blender", help="chemin de blender.exe (sinon studio.json ou recherche automatique)")
+
     a = ap.parse_args(argv)
     try:
         if a.cmd == "studio":
@@ -67,6 +81,11 @@ def main(argv=None):
                 src = found[0]
             if not fbx.export(src, blender=a.blender, root_mode="ABSOLUTE" if a.absolu else "RELATIVE"):
                 return 1
+        elif a.cmd == "taille":
+            pipeline.rescale_take(a.capture, a.cm, blender=a.blender,
+                                  studio_dir=a.studio if os.path.isdir(a.studio) else None)
+        elif a.cmd == "animer":
+            pipeline.animate_character(a.capture, a.studio, a.personnage, blender=a.blender)
         elif a.cmd == "init":
             path = pipeline.init_studio(a.studio)
             print(f"Studio créé : {path}\nMesurez la position de vos boules et éditez ce fichier.")
@@ -91,7 +110,7 @@ def main(argv=None):
                 manual[k.strip()] = float(v)
             pipeline.process_take(a.studio, a.prise, force=a.force, manual_delays=manual,
                                   only_calib=(a.cmd == "marqueurs"))
-    except (RuntimeError, FileNotFoundError) as e:
+    except (RuntimeError, FileNotFoundError, ValueError) as e:
         print(f"\nERREUR : {e}", file=sys.stderr)
         return 1
     return 0

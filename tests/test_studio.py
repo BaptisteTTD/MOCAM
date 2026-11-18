@@ -53,6 +53,11 @@ class FakePhone:
         self.take = None
         self.ws = None
         self.recording = False
+        self.fov = 1.0
+        self.snapshots = 0
+        # le poco « rate » la première demande d'image (occupé à envoyer l'aperçu) :
+        # Studio doit la redemander tout seul
+        self.ignore_first_snapshot = ci == 1
 
     def now(self):
         return time.time() * 1000 + self.clock
@@ -79,7 +84,8 @@ class FakePhone:
                 await self.ws.send_str(json.dumps(dict(
                     t="status", battery=0.8 - 0.3 * self.ci, storage_free=20e9, fps=60, stabilization="off",
                     exposure=dict(duration=1 / 500, iso=400, mode="locked", focus="locked"),
-                    recording=self.recording, locked=True, device="Back Camera")))
+                    recording=self.recording, locked=True, device="Back Camera", fov=self.fov,
+                    fov_options=[0.5, 0.7, 1, 1.5, 2], lens="ultra" if self.fov < 1 else "wide", app="1.1.0")))
                 await self.send_bin(1, self.small)
                 await asyncio.sleep(0.5)
 
@@ -96,7 +102,15 @@ class FakePhone:
                 await self.ws.send_str(json.dumps(dict(t="pong", s0=m["s0"], c=c)))
             elif t == "welcome":
                 self.name = m["name"]
+                if "fov" in m:
+                    self.fov = m["fov"]
+            elif t == "config":
+                if "fov" in m:
+                    self.fov = m["fov"]
             elif t == "snapshot":
+                self.snapshots += 1
+                if self.ignore_first_snapshot and self.snapshots == 1:
+                    continue
                 await self.send_bin(2, self.frame, 92)
             elif t == "start":
                 asyncio.create_task(self.start(m))
@@ -199,32 +213,35 @@ async def main():
                 st = await ui_state(session)
                 syncs = {c["name"]: c["sync_ms"] for c in st["cams"]}
                 ok("connexion des téléphones (QR + jeton)", len(st["cams"]) == 2, f"caméras : {syncs} (± ms)")
-                # précision de l'estimation d'horloge : on compare le décalage estimé au vrai
-                await page.locator("text=Vérifier les boules").click()
-                await page.wait_for_timeout(3000)
+                # un seul clic : les deux caméras sont vérifiées, même celle qui rate la 1re demande
+                await page.locator(".checks button", has_text="Vérifier").click()
+                await page.wait_for_timeout(9000)
                 st = await ui_state(session)
                 chk = {c["name"]: c["check"] for c in st["cams"]}
                 good = all(v and v.get("ok") and v["seen"] >= 4 for v in chk.values())
-                ok("vérification des boules en direct", good,
+                ok("vérification des boules en un clic (image redemandée si perdue)", good and phones[1].snapshots >= 2,
                    "; ".join(f"{k}: {v.get('seen')}/{v.get('total')} boules, erreur {v.get('rms')} px, caméra à {v.get('center')}"
-                             for k, v in chk.items()))
-                # côté du carré des boules saisi dans l'interface -> studio.json
-                await page.fill("#side", "1.8")
-                await page.locator("#square button").click()
-                await page.wait_for_timeout(600)
-                cfg1 = json.load(open(os.path.join(STUDIO, "studio.json"), encoding="utf-8"))
-                pos1 = {m["name"]: m["position"][:2] for m in cfg1["markers"]}
+                             for k, v in chk.items()) + f" ; poco : {phones[1].snapshots} demandes")
+                # champ de vision choisi dans Studio -> téléphone, retenu pour la prochaine connexion
+                await page.locator("#card-" + [c["id"] for c in st["cams"] if c["name"] == "iphone"][0]
+                                   + " .seg button", has_text="×0,5").click()
+                await page.wait_for_timeout(1500)
                 st = await ui_state(session)
-                await page.fill("#side", "2.5")
-                await page.locator("#square button").click()
-                await page.wait_for_timeout(600)
-                cfg2 = json.load(open(os.path.join(STUDIO, "studio.json"), encoding="utf-8"))
-                pos2 = {m["name"]: m["position"][:2] for m in cfg2["markers"]}
-                ok("côté du carré saisi dans Studio", pos1["C"] == [1.8, 1.8] and pos1["E"] == [0.0, 0.9]
-                   and pos2["B"] == [2.5, 0.0] and st["layout"]["side"] == 1.8,
-                   f"1,8 m -> C {pos1['C']}, E {pos1['E']} ; retour à 2,5 m -> B {pos2['B']}")
-                await page.locator("text=Vérifier les boules").click()
-                await page.wait_for_timeout(3000)
+                fovs = {c["name"]: c["fov"] for c in st["cams"]}
+                saved = json.load(open(os.path.join(STUDIO, "objectifs.json"), encoding="utf-8"))
+                ok("champ de vision depuis Studio", phones[0].fov == 0.5 and fovs["iphone"] == 0.5 and saved.get("iphone") == 0.5,
+                   f"téléphone ×{phones[0].fov}, affiché {fovs}, mémorisé {saved}")
+                # taille de l'acteur en cm -> studio.json, puis take.json de la prise
+                await page.fill("#actorH", "182")
+                await page.locator("#takeName").click()
+                await page.wait_for_timeout(1200)
+                cfg1 = json.load(open(os.path.join(STUDIO, "studio.json"), encoding="utf-8"))
+                ok("taille de l'acteur saisie en cm", cfg1.get("actor_height_cm") == 182,
+                   f"studio.json : actor_height_cm = {cfg1.get('actor_height_cm')}")
+                # QR code : adresses du PC, sans IP à taper
+                txt = await page.locator(".add").inner_text()
+                ok("connexion par QR code uniquement", "Scannez" in txt and "127.0.0.1" not in txt and str(PORT) not in txt,
+                   "texte de la carte : " + " / ".join(x for x in txt.splitlines() if x.strip())[:200])
                 shot1 = os.path.join(D, "studio_avant.png")
                 await page.screenshot(path=shot1)
                 SHOTS.append(shot1)
@@ -243,7 +260,7 @@ async def main():
                 SHOTS.append(shot2)
                 ok("signal sonore joué au départ", bool(chirps),
                    f"{(chirps[0] - t_click) / 1000:.2f} s après le clic" if chirps else "aucun")
-                await page.locator("button.stopbtn").click()
+                await page.locator("button.recbtn.stop").click()
                 for _ in range(120):
                     await page.wait_for_timeout(250)
                     st = await ui_state(session)
@@ -254,7 +271,8 @@ async def main():
                 files = sorted(f for f in os.listdir(tdir) if f.endswith(".mp4"))
                 meta = json.load(open(os.path.join(tdir, "take.json"), encoding="utf-8"))
                 ok("rapatriement des vidéos + take.json (iPhone déconnecté juste après l'envoi)",
-                   files == ["iphone.mp4", "poco.mp4"] and meta["chirp_at_pc"]
+                   files == ["iphone.mp4", "poco.mp4"] and meta["chirp_at_pc"] and meta.get("actor_height_cm") == 182
+                   and meta["cameras"]["iphone"].get("fov") == 0.5
                    and sorted(meta["cameras"]) == ["iphone", "poco"]
                    and meta["cameras"]["iphone"].get("started_at_pc"),
                    f"{take} : {files}, caméras dans take.json : {sorted(meta['cameras'])}")
@@ -265,15 +283,22 @@ async def main():
                 ok("horodatage des départs (horloges synchronisées)", err < 60,
                    f"écart de départ estimé {est['poco'] - est['iphone']:.0f} ms, réel {real['poco'] - real['iphone']:.0f} ms (erreur {err:.0f} ms)")
                 await page.wait_for_timeout(600)
-                # bouton « Traiter » : lance le traitement, journal affiché en direct
+                # onglet Prises, bouton « Traiter la prise » : progression par étapes + journal
                 # (ici il s'arrête à l'étape 4 : les modèles de détection ne sont pas téléchargeables)
-                await page.locator(".take button", has_text="Traiter").first.click()
+                await page.locator(".tab", has_text="Prises").click()
+                await page.locator(".tk", has_text=take).click()
+                await page.locator("button", has_text="Traiter la prise").click()
+                steps_seen = set()
                 for _ in range(240):
                     await page.wait_for_timeout(250)
-                    txt = await page.locator("#log").inner_text()
+                    stx = await ui_state(session)
+                    if stx["processing"] and stx["processing"].get("step"):
+                        steps_seen.add(stx["processing"]["step"])
+                    txt = await page.locator("#log").text_content()
                     if "4/6" in txt or "Terminé" in txt or "ERREUR" in txt or "Error" in txt:
                         break
-                ok("bouton Traiter + journal en direct", "1/6" in txt and "3/6" in txt,
+                ok("bouton Traiter + étapes + journal en direct", "1/6" in txt and "3/6" in txt and 3 in steps_seen,
+                   f"étapes vues {sorted(steps_seen)} ; " +
                    " / ".join(l for l in txt.splitlines() if l.strip().startswith(("1/6", "2/6", "3/6", "4/6")))[:300])
                 shot3 = os.path.join(D, "studio_fin.png")
                 await page.screenshot(path=shot3)

@@ -512,7 +512,162 @@ def test_transfer(path):
        f"rotation image par image identique à la source à {tw:.2f}° près, déplacement × {ratio:.2f} (tailles × 0,80)")
 
 
+def _rig_names(kind):
+    """Noms d'os d'autres logiciels pour les 65 os Mixamo (pour tester la reconnaissance)."""
+    F = ("Thumb", "Index", "Middle", "Ring", "Pinky")
+    m = {}
+    if kind == "unreal":
+        m.update(Hips="pelvis", Spine="spine_01", Spine1="spine_02", Spine2="spine_03", Neck="neck_01",
+                 Head="head", HeadTop_End="head_end")
+        for S, s in (("Left", "l"), ("Right", "r")):
+            m.update({f"{S}Shoulder": f"clavicle_{s}", f"{S}Arm": f"upperarm_{s}", f"{S}ForeArm": f"lowerarm_{s}",
+                      f"{S}Hand": f"hand_{s}", f"{S}UpLeg": f"thigh_{s}", f"{S}Leg": f"calf_{s}",
+                      f"{S}Foot": f"foot_{s}", f"{S}ToeBase": f"ball_{s}", f"{S}Toe_End": f"ball_end_{s}"})
+            for f in F:
+                for k in range(1, 5):
+                    m[f"{S}Hand{f}{k}"] = f"{f.lower()}_{k:02d}_{s}"
+    elif kind == "biped":
+        m.update(Hips="Bip001 Pelvis", Spine="Bip001 Spine", Spine1="Bip001 Spine1", Spine2="Bip001 Spine2",
+                 Neck="Bip001 Neck", Head="Bip001 Head", HeadTop_End="Bip001 HeadNub")
+        for S, s in (("Left", "L"), ("Right", "R")):
+            m.update({f"{S}Shoulder": f"Bip001 {s} Clavicle", f"{S}Arm": f"Bip001 {s} UpperArm",
+                      f"{S}ForeArm": f"Bip001 {s} Forearm", f"{S}Hand": f"Bip001 {s} Hand",
+                      f"{S}UpLeg": f"Bip001 {s} Thigh", f"{S}Leg": f"Bip001 {s} Calf", f"{S}Foot": f"Bip001 {s} Foot",
+                      f"{S}ToeBase": f"Bip001 {s} Toe0", f"{S}Toe_End": f"Bip001 {s} Toe0Nub"})
+            for i, f in enumerate(F):
+                m.update({f"{S}Hand{f}1": f"Bip001 {s} Finger{i}", f"{S}Hand{f}2": f"Bip001 {s} Finger{i}1",
+                          f"{S}Hand{f}3": f"Bip001 {s} Finger{i}2", f"{S}Hand{f}4": f"Bip001 {s} Finger{i}Nub"})
+    elif kind == "cc":
+        m.update(Hips="CC_Base_Hip", Spine="CC_Base_Waist", Spine1="CC_Base_Spine01", Spine2="CC_Base_Spine02",
+                 Neck="CC_Base_NeckTwist01", Head="CC_Base_Head", HeadTop_End="CC_Base_HeadEnd")
+        for S, s in (("Left", "L"), ("Right", "R")):
+            m.update({f"{S}Shoulder": f"CC_Base_{s}_Clavicle", f"{S}Arm": f"CC_Base_{s}_Upperarm",
+                      f"{S}ForeArm": f"CC_Base_{s}_Forearm", f"{S}Hand": f"CC_Base_{s}_Hand",
+                      f"{S}UpLeg": f"CC_Base_{s}_Thigh", f"{S}Leg": f"CC_Base_{s}_Calf", f"{S}Foot": f"CC_Base_{s}_Foot",
+                      f"{S}ToeBase": f"CC_Base_{s}_ToeBase", f"{S}Toe_End": f"CC_Base_{s}_ToeBaseEnd"})
+            for f in F:
+                for k in range(1, 5):
+                    m[f"{S}Hand{f}{k}"] = f"CC_Base_{s}_{'Mid' if f == 'Middle' else f}{k}"
+    return m
+
+
+def test_rigs(path):
+    """Personnages aux squelettes d'autres logiciels (Unreal, Biped 3ds Max, Character Creator) :
+    os reconnus, retarget correct ; puis fichier personnage (maillage + squelette) -> FBX animé
+    + aperçu GLB, comme MocapCam Studio le fait sans interface."""
+    import bpy
+    import mathutils
+    import mocapcam_blender as mb
+    src_fbx = os.path.join(OUT, "rigs_source.fbx")
+    mb.capture_to_fbx(path, src_fbx)
+    _, J = mb.load_motion(path)
+    pairs = [("l_shoulder", "l_elbow"), ("l_elbow", "l_wrist"), ("r_elbow", "r_wrist"), ("l_hip", "l_knee"),
+             ("r_knee", "r_ankle"), ("lh_5", "lh_6"), ("rh_9", "rh_10"), ("lh_0", "lh_9")]
+    lines = []
+    allok = True
+    for kind in ("unreal", "biped", "cc"):
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        src = mb.import_animation(bpy.context, src_fbx)
+        sc = bpy.context.scene
+        M = mathutils.Matrix.Rotation(math.radians(90), 4, "X") @ mathutils.Matrix.Scale(0.01, 4)
+        dst = mb.create_mixamo_armature(bpy.context, {k: v * 0.9 for k, v in J.items()}, name="Perso",
+                                        obj_matrix=M, pose="A")
+        names = _rig_names(kind)
+        for short, new in names.items():
+            b = dst.data.bones.get("mixamorig:" + short)
+            if b is not None:
+                b.name = new
+        bm = mb.bone_map(dst)
+        want = {k: v for k, v in names.items() if not k.endswith(("_End", "4")) and k in bm or k in
+                ("Hips", "Spine", "Spine1", "Spine2", "Neck", "Head", "LeftArm", "RightForeArm", "LeftHandIndex1",
+                 "RightHandThumb2", "LeftUpLeg", "RightFoot", "LeftToeBase")}
+        wrong = [k for k, v in want.items() if bm.get(k) != v]
+        mb.transfer_motion(bpy.context, src, dst)
+        errs = []
+        for f in range(sc.frame_start, sc.frame_end + 1, 7):
+            sc.frame_set(f)
+            a = mb.virtual_joints(src, None, posed=True)
+            b = mb.virtual_joints(dst, bm, posed=True)
+            for p, q in pairs:
+                u, v = a[q] - a[p], b[q] - b[p]
+                errs.append(math.degrees(math.acos(np.clip(np.dot(u, v) / np.linalg.norm(u) / np.linalg.norm(v), -1, 1))))
+        e95 = float(np.percentile(errs, 95))
+        good = not wrong and e95 < 2.0 and mb.rig_kind(dst) != "Mixamo"
+        allok &= good
+        lines.append(f"{kind} ({mb.rig_kind(dst)}) : {len(bm)} os reconnus{', erreurs ' + str(wrong) if wrong else ''}, "
+                     f"directions 95 % < {e95:.2f}°")
+    # fichier personnage (squelette Unreal + maillage lié) -> FBX animé + GLB
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    arm = mb.create_mixamo_armature(bpy.context, J, name="Heros", pose="A")
+    for short, new in _rig_names("unreal").items():
+        b = arm.data.bones.get("mixamorig:" + short)
+        if b is not None:
+            b.name = new
+    bpy.ops.mesh.primitive_cylinder_add(radius=0.15, depth=1.6, location=(0, 0, 0.9))
+    body = bpy.context.active_object
+    body.name = "Heros_corps"
+    for bn in ("pelvis", "spine_02", "head", "upperarm_l", "thigh_r"):
+        body.vertex_groups.new(name=bn)
+    body.vertex_groups["pelvis"].add(list(range(len(body.data.vertices))), 1.0, "REPLACE")
+    body.modifiers.new("Armature", "ARMATURE").object = arm
+    body.parent = arm
+    char = os.path.join(OUT, "heros.fbx")
+    for o in bpy.context.view_layer.objects:
+        o.select_set(True)
+    bpy.ops.export_scene.fbx(filepath=char, use_selection=True, add_leaf_bones=False)
+    info = mb.inspect_character(char, os.path.join(OUT, "heros_apercu.glb"))
+    out = os.path.join(OUT, "heros_anime.fbx")
+    glb = os.path.join(OUT, "heros_anime.glb")
+    rep = mb.retarget_file(src_fbx, char, out, glb_path=glb)
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.import_scene.fbx(filepath=out)
+    a2 = [o for o in bpy.data.objects if o.type == "ARMATURE"][0]
+    meshes = [o for o in bpy.data.objects if o.type == "MESH"]
+    n = int(round(a2.animation_data.action.frame_range[1] - a2.animation_data.action.frame_range[0])) + 1
+    with open(path, encoding="utf-8") as f:
+        nf = json.load(f)["frame_count"]
+    file_ok = (info["kind"] == "Unreal" and info["meshes"] == 1 and len(meshes) == 1 and n == nf
+               and os.path.getsize(glb) > 10000 and rep["animated"] > 40)
+    ok("personnages d'autres logiciels (Unreal, Biped, Character Creator)", allok and file_ok,
+       " | ".join(lines) + f" | fichier personnage : {info['kind']}, {info['meshes']} maillage, "
+       f"FBX animé {n} images, aperçu GLB {os.path.getsize(glb) / 1e3:.0f} ko")
+
+
 # --------------------------------------------------------------------------- 5b. boules imprécises
+
+def test_height(path):
+    """Taille de l'acteur en cm : la règle du traitement donne exactement la taille du squelette
+    exporté, et une prise traitée se remet à la taille indiquée sans retraitement."""
+    import shutil
+    import bpy
+    import mocapcam_blender as mb
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    X = pipeline._load_positions(data)
+    h = pipeline.rig_height(X)
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    _, J = mb.load_motion(path)
+    arm = mb.create_mixamo_armature(bpy.context, J)
+    top = max((arm.matrix_world @ b.tail_local).z for b in arm.data.bones)
+    d = os.path.join(OUT, "prise_taille")
+    os.makedirs(os.path.join(d, "mocapcam"), exist_ok=True)
+    shutil.copy(path, os.path.join(d, "mocapcam", "prise_taille.mocap.json"))
+    pipeline.rescale_take(d, 180, blender=False, log=lambda *a: None)
+    with open(os.path.join(d, "mocapcam", "prise_taille.mocap.json"), encoding="utf-8") as f:
+        d2 = json.load(f)
+    h2 = pipeline.rig_height(pipeline._load_positions(d2))
+    with open(os.path.join(d, "take.json"), encoding="utf-8") as f:
+        meta = json.load(f)
+    # le sol reste le sol : les pieds ne quittent pas z = 0
+    X2 = pipeline._load_positions(d2)
+    foot = lambda X: np.nanpercentile(X[:, INDEX["l_heel"], 2], 5)
+    floor_ok = abs(foot(X2) - foot(X) * 1.8 / h) < 1e-3
+    tgt = pipeline.target_height_m({"actor_height_cm": 175}, {"actor_height_cm": "182"})
+    ok("taille de l'acteur en cm", abs(top - h) < 2e-3 and abs(h2 - 1.80) < 1e-3 and meta.get("actor_height_cm") == 180
+       and floor_ok and abs(tgt - 1.82) < 1e-9,
+       f"squelette exporté {top * 100:.1f} cm, règle du traitement {h * 100:.1f} cm ; prise remise à "
+       f"{h2 * 100:.1f} cm (demandé 180) sans retraitement, pieds au sol")
+
 
 def test_imprecise_balls(X_gt):
     """Conditions réelles : boules posées à ±4 cm près, focale inconnue (objectif nominal
@@ -735,8 +890,10 @@ if __name__ == "__main__":
     test_sync_motion(X_gt)
     test_imprecise_balls(X_gt)
     test_blender(path, X_gt)
+    test_height(path)
     test_fbx(path)
     test_transfer(path)
+    test_rigs(path)
     n_ok = sum(1 for v in RESULTS.values() if v[0])
     print(f"\n{n_ok}/{len(RESULTS)} tests réussis")
     with open(os.path.join(OUT, "resultats.json"), "w", encoding="utf-8") as f:

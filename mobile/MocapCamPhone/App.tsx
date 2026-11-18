@@ -45,7 +45,7 @@ import {
   type Settings,
 } from './src/settings'
 
-const APP_VERSION = '1.0.5'
+const APP_VERSION = '1.1.0'
 
 // Erreurs hors affichage (minuteries, callbacks natifs) : on les montre à l'écran
 // au lieu de laisser l'app se fermer.
@@ -155,9 +155,8 @@ function ConnectScreen({
   onSettings: (s: Settings) => void
   onConnect: (i: ConnectInfo, raw: string) => void
 }) {
-  const [manual, setManual] = useState('')
   const [scanning, setScanning] = useState(true)
-  const [manualError, setManualError] = useState<string | null>(null)
+  const [bad, setBad] = useState(false)
   const done = useRef(false)
 
   const onCode = useCallback(
@@ -168,6 +167,8 @@ function ConnectScreen({
         done.current = true
         setScanning(false)
         onConnect(i, value)
+      } else {
+        setBad(true)
       }
     },
     [onConnect],
@@ -182,7 +183,9 @@ function ConnectScreen({
           Platform.OS === 'ios' ? <IosQrScanner onCode={onCode} /> : <SnapshotQrScanner onCode={onCode} />
         ) : null}
         <View style={styles.scanFrame} pointerEvents="none" />
-        <Text style={styles.scanHint}>Visez le QR code affiché par MocapCam Studio sur le PC</Text>
+        <Text style={styles.scanHint}>
+          {bad ? "Ce n'est pas un QR code de MocapCam Studio" : 'Visez le QR code affiché par MocapCam Studio sur le PC'}
+        </Text>
       </View>
       <View style={styles.side}>
         <Text style={styles.title}>MocapCam</Text>
@@ -196,39 +199,19 @@ function ConnectScreen({
           onEndEditing={() => onSettings({ ...settings, name: cleanName(settings.name) })}
         />
         <Text style={styles.small}>Il donne son nom à la vidéo : iphone, poco…</Text>
+        <Text style={[styles.small, { marginTop: 18, color: '#aab' }]}>
+          Le téléphone et le PC doivent être sur le même Wi-Fi. Sans Wi-Fi, activez le partage de connexion
+          d'un des téléphones et connectez-y le PC : ce téléphone peut filmer lui aussi.
+        </Text>
         {lastInfo ? (
           <Btn
-            label="Reconnecter au dernier PC"
+            label="Reprendre la dernière connexion"
             onPress={() => {
               done.current = true
               onConnect(lastInfo, settings.lastQr!)
             }}
           />
         ) : null}
-        <Text style={[styles.label, { marginTop: 16 }]}>Ou adresse et code affichés dans Studio</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="192.168.1.20:8765 ab12cd34"
-          placeholderTextColor="#777"
-          value={manual}
-          autoCapitalize="none"
-          keyboardType="numbers-and-punctuation"
-          onChangeText={setManual}
-        />
-        <Btn
-          label="Se connecter"
-          onPress={() => {
-            const i = parseQr(manual)
-            if (!i || !i.token) {
-              setManualError('Format attendu : 192.168.1.20:8765 ab12cd34')
-              return
-            }
-            done.current = true
-            setScanning(false)
-            onConnect(i, manual)
-          }}
-        />
-        {manualError ? <Text style={[styles.small, { color: '#ff8a80' }]}>{manualError}</Text> : null}
       </View>
     </View>
   )
@@ -315,8 +298,9 @@ function CaptureScreen({
   // caméra virtuelle (LiDAR + grand-angle, double…), qu'on évite.
   const defaultBack = useCameraDevice('back')
   const allDevices = useCameraDevices()
-  // objectif choisi depuis Studio : 'wide' (×1) ou 'ultra' (×0,5, champ plus large)
-  const [lens, setLens] = useState<'wide' | 'ultra'>('wide')
+  // champ de vision, en équivalent zoom de l'objectif principal : ×0,5 (ultra grand-angle,
+  // le plus large), ×0,7, ×1, ×1,5, ×2. Choisi sur le téléphone ou depuis Studio.
+  const [fov, setFov] = useState(1)
   const lensSetup = useMemo(() => {
     const back = allDevices.filter((d) => d.position === 'back')
     const physical = (t: string) => back.find((d) => d.type === t && !d.isVirtualDevice)
@@ -327,13 +311,27 @@ function CaptureScreen({
     }
     const ultraDev = back.find((d) => d.type === 'ultra-wide-angle')
     // Android : l'ultra grand-angle peut aussi être accessible en zoomant sous ×1
-    const ultraByZoom = !ultraDev && Platform.OS === 'android' && (defaultBack?.minZoom ?? 1) < 0.95
+    const minZ = defaultBack?.minZoom ?? 1
+    const ultraByZoom = !ultraDev && Platform.OS === 'android' && minZ < 0.95
     const available = !!ultraDev || ultraByZoom
-    if (lens === 'ultra' && ultraDev) return { device: ultraDev, zoom: 1, available, used: 'ultra' as const }
-    if (lens === 'ultra' && ultraByZoom && defaultBack)
-      return { device: defaultBack, zoom: defaultBack.minZoom, available, used: 'ultra' as const }
-    return { device: wide, zoom: 1, available, used: 'wide' as const }
-  }, [allDevices, defaultBack, lens])
+    const widest = ultraDev ? 0.5 : ultraByZoom ? Math.round(minZ * 10) / 10 : 1
+    const maxW = wide?.maxZoom ?? 2
+    const options = [
+      ...(available ? [widest, Math.round(((widest + 1) / 2) * 10) / 10] : []),
+      1,
+      ...[1.5, 2].filter((z) => z <= maxW + 1e-6),
+    ].filter((v, i, a) => a.indexOf(v) === i)
+    // le plus proche des choix possibles
+    const want = options.reduce((b, v) => (Math.abs(v - fov) < Math.abs(b - fov) ? v : b), options[0])
+    if (want < 0.99 && ultraDev) {
+      const z = Math.min(ultraDev.maxZoom ?? 4, Math.max(ultraDev.minZoom ?? 1, want / 0.5))
+      return { device: ultraDev, zoom: z, available, used: 'ultra' as const, fov: want, options }
+    }
+    if (want < 0.99 && ultraByZoom && defaultBack)
+      return { device: defaultBack, zoom: Math.max(minZ, want), available, used: 'ultra' as const, fov: want, options }
+    const z = Math.min(maxW, Math.max(1, want))
+    return { device: wide, zoom: z, available, used: 'wide' as const, fov: want, options }
+  }, [allDevices, defaultBack, fov])
   const device = lensSetup.device
 
   // 1080p par défaut ; si le téléphone refuse 60 i/s en 1080p et que le PC demande
@@ -389,6 +387,7 @@ function CaptureScreen({
   const takeRef = useRef<string>('')
   const previewFps = useRef(3)
   const busySnap = useRef(false)
+  const wantFull = useRef(false)   // image pleine résolution demandée pendant l'envoi d'un aperçu
   const lastSnapSize = useRef<{ w: number; h: number } | null>(null)
   // format de l'aperçu (largeur / hauteur), connu dès la première image envoyée au PC
   const previewAspectRef = useRef(0)
@@ -578,7 +577,12 @@ function CaptureScreen({
   const sendSnapshot = useCallback(async (kind: 1 | 2) => {
     const ref = cameraRef.current
     const client = clientRef.current
-    if (!ref || !client || busySnap.current) return
+    if (!ref || !client) return
+    if (busySnap.current) {
+      // un aperçu est en cours d'envoi : l'image de vérification des boules partira juste après
+      if (kind === 2) wantFull.current = true
+      return
+    }
     busySnap.current = true
     try {
       let img: Image
@@ -610,8 +614,14 @@ function CaptureScreen({
       // caméra pas prête
     } finally {
       busySnap.current = false
+      if (wantFull.current) {
+        wantFull.current = false
+        setTimeout(() => void sendSnapshotRef.current(2), 0)
+      }
     }
   }, [photoOutput, videoOutput])
+  const sendSnapshotRef = useRef(sendSnapshot)
+  sendSnapshotRef.current = sendSnapshot
 
   // ---------------------------------------------------------------- commandes du PC
   const onCommand = useCallback(
@@ -630,7 +640,8 @@ function CaptureScreen({
           if (cmd.name && cmd.name !== nameRef.current) onSettings({ ...settings, name: cmd.name })
           if (typeof cmd.prefer60 === 'boolean') applyPrefer60(cmd.prefer60)
           if (typeof cmd.preview === 'number') previewFps.current = cmd.preview
-          if (cmd.lens === 'wide' || cmd.lens === 'ultra') setLens(cmd.lens)
+          if (typeof cmd.fov === 'number') setFov(cmd.fov)
+          else if (cmd.lens === 'wide' || cmd.lens === 'ultra') setFov(cmd.lens === 'ultra' ? 0.5 : 1)
           break
         case 'arm':
           void arm()
@@ -654,7 +665,10 @@ function CaptureScreen({
           previewFps.current = cmd.fps
           break
         case 'config':
-          if ((cmd.lens === 'wide' || cmd.lens === 'ultra') && !recorderRef.current?.isRecording) setLens(cmd.lens)
+          if (!recorderRef.current?.isRecording) {
+            if (typeof cmd.fov === 'number') setFov(cmd.fov)
+            else if (cmd.lens === 'wide' || cmd.lens === 'ultra') setFov(cmd.lens === 'ultra' ? 0.5 : 1)
+          }
           if (typeof cmd.prefer60 === 'boolean') applyPrefer60(cmd.prefer60)
           if (typeof cmd.preview === 'number') previewFps.current = cmd.preview
           break
@@ -753,6 +767,9 @@ function CaptureScreen({
         lens: liveRef.current.lensSetup.used,
         ultra_available: liveRef.current.lensSetup.available,
         zoom: liveRef.current.lensSetup.zoom,
+        fov: liveRef.current.lensSetup.fov,
+        fov_options: liveRef.current.lensSetup.options,
+        app: APP_VERSION,
         supports60: (() => {
           try {
             return liveRef.current.device ? liveRef.current.device.supportsFPS(60) : null
@@ -852,7 +869,7 @@ function CaptureScreen({
         <View style={[styles.dot, { backgroundColor: connColor }]} />
         <Text style={styles.camName}>{settings.name}</Text>
         <Text style={styles.small}>
-          {conn.state === 'connected' ? `connecté à ${conn.detail}` : conn.detail ?? 'connexion…'}
+          {conn.state === 'connected' ? 'connecté à MocapCam Studio' : conn.detail ?? 'connexion…'}
         </Text>
         <View style={{ flex: 1 }} />
         {recording ? (
@@ -864,9 +881,24 @@ function CaptureScreen({
       </View>
 
       <View style={styles.bottomBar}>
+        <View style={styles.seg}>
+          {lensSetup.options.map((v) => {
+            const on = Math.abs(v - lensSetup.fov) < 0.01
+            return (
+              <Pressable
+                key={v}
+                disabled={!!recording}
+                onPress={() => setFov(v)}
+                style={[styles.segBtn, on && styles.segOn, recording ? { opacity: 0.4 } : null]}
+              >
+                <Text style={[styles.segText, on && styles.segTextOn]}>{`×${String(v).replace('.', ',')}`}</Text>
+              </Pressable>
+            )
+          })}
+        </View>
         <Text style={styles.small}>
-          {camStatus.fps ? `${camStatus.fps} i/s` : '… i/s'} · stabilisation {camStatus.stabilization ?? '?'} ·{' '}
-          {locked ? 'expo/mise au point bloquées' : 'auto'}
+          {camStatus.fps ? `${camStatus.fps} i/s` : '… i/s'}
+          {locked ? '   exposition bloquée' : ''}
         </Text>
         <View style={{ flex: 1 }} />
         {upload ? <Text style={styles.small}>Envoi {Math.round(upload.pct * 100)} %</Text> : null}
@@ -1020,5 +1052,10 @@ const styles = StyleSheet.create({
   identify: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#2f6fedcc', alignItems: 'center', justifyContent: 'center' },
   identifyText: { color: '#fff', fontSize: 96, fontWeight: '800' },
   mask: { position: 'absolute', backgroundColor: '#000a' },
+  seg: { flexDirection: 'row', backgroundColor: '#000a', borderRadius: 18, padding: 3, gap: 2 },
+  segBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 15 },
+  segOn: { backgroundColor: '#ffd54f' },
+  segText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  segTextOn: { color: '#111' },
   frameGuide: { position: 'absolute', borderWidth: 2, borderColor: '#ffd54f' },
 })

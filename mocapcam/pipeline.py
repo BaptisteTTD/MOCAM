@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 
 from . import autocalib, fbx, intrinsics, markers as mk, motion_opt, pose2d, sync, syncbody, triangulate, video
-from .skeleton import JOINT_NAMES
+from .skeleton import INDEX, JOINT_NAMES
 
 DEFAULT_STUDIO = {
     "cameras": ["iphone", "poco"],
@@ -23,6 +23,9 @@ DEFAULT_STUDIO = {
         {"name": "E", "color": "rouge", "position": [0.0, 1.25, 0.0]},
     ],
     "volume": {"margin": 0.5, "height": 2.3},
+    # taille de l'acteur (cm) : le squelette exporté est mis à cette taille (vide = échelle des boules)
+    "actor_height_cm": None,
+    "character": "",        # personnage animé après chaque traitement (dossier studio/personnages/<id>)
     "blender": "",          # chemin de blender.exe pour l'export FBX (vide = recherche automatique)
     "fbx": True,            # créer <prise>.fbx (squelette Mixamo animé) après le traitement
     "sync_by_motion": True,  # affiner la synchro du bip avec le mouvement de l'acteur
@@ -68,12 +71,23 @@ def _lens(meta, name):
     return ((meta or {}).get("cameras", {}).get(name, {}) or {}).get("lens") or "wide"
 
 
+def _fov(meta, name):
+    """Champ de vision choisi dans l'app (équivalent zoom), ou None (prises plus anciennes)."""
+    c = ((meta or {}).get("cameras", {}).get(name, {}) or {})
+    try:
+        v = float(c.get("fov"))
+        return v if 0.2 <= v <= 10 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _evaluate_layout(views, ml):
     """Pose de chaque caméra pour une disposition donnée ; score total (plus bas = mieux)."""
     total, poses = 0.0, []
     for v in views:
         try:
-            p = mk.solve_camera_pose(v["bg"], ml, v["K"], v["dist"], lens=v["lens"], cands=v["cands"])
+            p = mk.solve_camera_pose(v["bg"], ml, v["K"], v["dist"], lens=v["lens"], cands=v["cands"],
+                                     fov=v.get("fov"))
         except RuntimeError:
             p = None
         poses.append(p)
@@ -146,7 +160,7 @@ def calibrate_extrinsics(cfg, studio_dir, norm_videos, work, log=print, meta=Non
             K, dist = None, None
         frames = video.sample_frames(path, 30)
         views.append(dict(name=name, info=info, bg=bg, K=K, dist=dist, fixed=fixed, lens=_lens(meta, name),
-                          cands=mk.find_candidates(bg, mlist, frames)))
+                          fov=_fov(meta, name), cands=mk.find_candidates(bg, mlist, frames)))
     mlist, poses, layout = choose_layout(views, mlist, log)
     failed = [v["name"] for v, p in zip(views, poses) if p is None]
     if failed:
@@ -175,7 +189,8 @@ def calibrate_extrinsics(cfg, studio_dir, norm_videos, work, log=print, meta=Non
             f"caméra à ({pose['center'][0]:.2f}, {pose['center'][1]:.2f}, {pose['center'][2]:.2f}) m{miss}")
         if pose["rms"] > 4:
             log(f"  ATTENTION {name} : erreur élevée, vérifiez calibration_{name}.jpg")
-        f_nom = (v["K"] if v["K"] is not None else mk.default_K(info["width"], info["height"], v["lens"]))[0, 0]
+        f_nom = (v["K"] if v["K"] is not None else
+                 mk.default_K(info["width"], info["height"], v["lens"], v.get("fov")))[0, 0]
         cams.append(dict(name=name, K=pose["K"], dist=np.asarray(pose["dist"], float), R=pose["R"],
                          t=np.asarray(pose["t"]), center=pose["center"], rms=pose["rms"],
                          width=info["width"], height=info["height"],
@@ -199,6 +214,58 @@ def actor_height(X):
     if len(leg) < 10:
         return None
     return float(np.median(leg) / 0.49)
+
+
+def _seg_median(X, a, b):
+    v = np.linalg.norm(X[:, a] - X[:, b], axis=1)
+    v = v[np.isfinite(v)]
+    return float(np.median(v)) if v.size > 10 else None
+
+
+def rig_height(X):
+    """Taille (m) du squelette Mixamo exporté, debout, du sol au sommet de la tête.
+
+    Même règle que l'add-on Blender (create_mixamo_armature) : cuisses, tibias, buste et cou
+    mesurés sur la prise, chevilles et crâne en proportion. Saisir la taille réelle de
+    l'acteur met donc le squelette exporté exactement à cette taille."""
+    def mid(a, b):
+        return (X[:, INDEX[a]] + X[:, INDEX[b]]) / 2
+    seg = {}
+    for k, (a, b) in dict(thigh=("hip", "knee"), shin=("knee", "ankle")).items():
+        v = [_seg_median(X, INDEX[f"{s}_{a}"], INDEX[f"{s}_{b}"]) for s in ("l", "r")]
+        v = [x for x in v if x is not None]
+        if not v:
+            return None
+        seg[k] = float(np.mean(v))
+    Y = np.stack([mid("l_hip", "r_hip"), mid("l_shoulder", "r_shoulder"), mid("l_ear", "r_ear")], axis=1)
+    torso, neck = _seg_median(Y, 0, 1), _seg_median(Y, 1, 2)
+    if torso is None or neck is None:
+        return None
+    sc = (seg["thigh"] + seg["shin"]) / 0.85
+    return seg["shin"] + seg["thigh"] + torso + neck + 0.24 * sc
+
+
+def target_height_m(cfg, meta):
+    """Taille indiquée pour l'acteur (take.json de la prise, sinon studio.json), en m."""
+    for src in (meta or {}, cfg):
+        v = src.get("actor_height_cm")
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            continue
+        if 50 <= v <= 260:
+            return v / 100.0
+    return None
+
+
+def scale_world(X, cams, vol, s):
+    """Met toute la scène à l'échelle autour de l'origine (le sol reste le sol)."""
+    X = X * s
+    for c in cams:
+        c["t"] = (np.asarray(c["t"], float) * s).reshape(np.shape(c["t"]))
+        c["center"] = [float(v) * s for v in c["center"]]
+    vol = (np.asarray(vol[0], float) * s, np.asarray(vol[1], float) * s)
+    return X, cams, vol
 
 
 def load_take_meta(take_dir):
@@ -296,6 +363,122 @@ def export_motion(path, X, fps, cams, cfg, vol, stats):
     return path
 
 
+# --------------------------------------------------------------------------- personnages riggés
+
+def characters_dir(studio_dir):
+    return os.path.join(studio_dir, "personnages")
+
+
+def list_characters(studio_dir):
+    d = characters_dir(studio_dir)
+    out = []
+    if os.path.isdir(d):
+        for cid in sorted(os.listdir(d)):
+            mf = os.path.join(d, cid, "personnage.json")
+            if os.path.exists(mf):
+                try:
+                    with open(mf, encoding="utf-8") as f:
+                        m = json.load(f)
+                except (OSError, ValueError):
+                    continue
+                m["id"] = cid
+                out.append(m)
+    return out
+
+
+def get_character(studio_dir, cid):
+    return next((c for c in list_characters(studio_dir) if c["id"] == cid), None)
+
+
+def character_outputs(take_dir, cid):
+    name = os.path.basename(os.path.normpath(take_dir))
+    return (os.path.join(take_dir, f"{name}_{cid}.fbx"),
+            os.path.join(take_dir, "mocapcam", f"{name}_{cid}.glb"))
+
+
+def animate_character(take_dir, studio_dir, cid, log=print, blender=None):
+    """Anime un personnage riggé avec la prise : <prise>_<personnage>.fbx dans la prise."""
+    name = os.path.basename(os.path.normpath(take_dir))
+    anim = os.path.join(take_dir, f"{name}.fbx")
+    if not os.path.exists(anim):
+        raise FileNotFoundError("FBX de la prise absent : traitez-la d'abord")
+    ch = get_character(studio_dir, cid)
+    if ch is None:
+        raise FileNotFoundError(f"personnage inconnu : {cid}")
+    src = os.path.join(characters_dir(studio_dir), cid, ch["file"])
+    out, glb = character_outputs(take_dir, cid)
+    os.makedirs(os.path.dirname(glb), exist_ok=True)
+    if blender is None:
+        blender = load_studio(studio_dir).get("blender") or None
+    log(f"Animation de « {ch.get('name', cid)} » avec {name}…")
+    rep = fbx.retarget(anim, src, out, glb, blender=blender, log=log)
+    if not rep:
+        raise RuntimeError("le personnage n'a pas pu être animé (voir le journal)")
+    return out
+
+
+def _animated_characters(take_dir, studio_dir):
+    return [c["id"] for c in list_characters(studio_dir) if os.path.exists(character_outputs(take_dir, c["id"])[0])]
+
+
+def _load_positions(data):
+    return np.array([[[np.nan] * 3 if p is None else p for p in fr] for fr in data["positions"]], float)
+
+
+def rescale_take(take_dir, height_cm, blender=None, log=print, studio_dir=None):
+    """Met une prise déjà traitée à la taille indiquée (cm), sans refaire le traitement,
+    puis recrée son FBX. Retourne le chemin du FBX (ou de la capture si pas de Blender)."""
+    name = os.path.basename(os.path.normpath(take_dir))
+    path = os.path.join(take_dir, "mocapcam", f"{name}.mocap.json")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Prise non traitée : {take_dir}")
+    height_cm = float(height_cm)
+    if not 50 <= height_cm <= 260:
+        raise ValueError("taille entre 50 et 260 cm")
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    X = _load_positions(data)
+    h = rig_height(X)
+    if h is None:
+        raise RuntimeError("squelette incomplet : taille impossible à mesurer")
+    s = height_cm / 100.0 / h
+    cams = [dict(c) for c in data.get("cameras", [])]
+    vol = (data["volume"]["min"], data["volume"]["max"]) if "volume" in data else ([0, 0, 0], [0, 0, 0])
+    X, cams, vol = scale_world(X, cams, vol, s)
+    data["positions"] = [[None if not np.isfinite(p).all() else [round(float(v), 4) for v in p]
+                          for p in frame] for frame in X]
+    for c in cams:
+        c["t"] = np.asarray(c["t"]).tolist()
+    data["cameras"] = cams
+    data["volume"] = {"min": np.asarray(vol[0]).tolist(), "max": np.asarray(vol[1]).tolist()}
+    st = data.setdefault("stats", {})
+    st["scale_applied"] = float(st.get("scale_applied") or 1.0) * s
+    st["actor_height_m"] = rig_height(X)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, separators=(",", ":"), default=_jsonable)
+    meta_path = os.path.join(take_dir, "take.json")
+    meta = {}
+    if os.path.exists(meta_path):
+        with open(meta_path, encoding="utf-8") as f:
+            meta = json.load(f)
+    meta["actor_height_cm"] = round(height_cm, 1)
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2, ensure_ascii=False)
+    log(f"{name} : squelette mis à {height_cm:.0f} cm (× {s:.3f})")
+    out = path
+    if blender is not False:
+        cfg = load_studio(studio_dir) if studio_dir else {}
+        chars = _animated_characters(take_dir, studio_dir) if studio_dir else []
+        out = fbx.export(path, os.path.join(take_dir, f"{name}.fbx"),
+                         blender=blender or cfg.get("blender") or None, log=log) or path
+        for cid in chars:          # personnages déjà animés avec cette prise : refaits à la bonne taille
+            try:
+                animate_character(take_dir, studio_dir, cid, log=log, blender=blender or cfg.get("blender") or None)
+            except (RuntimeError, FileNotFoundError) as e:
+                log(f"  {cid} : {e}")
+    return out
+
+
 def process_take(studio_dir, take_dir, force=False, manual_delays=None, only_calib=False,
                  log=print):
     t0 = time.time()
@@ -382,14 +565,21 @@ def process_take(studio_dir, take_dir, force=False, manual_delays=None, only_cal
     stats["delays_sound_s"] = dict(zip(norm.keys(), delays_s))
     stats["camera_fps"] = cam_fps
     stats["autocalibration"] = ac
-    h = actor_height(X)
-    stats["actor_height_m"] = h
-    if h is not None:
-        log(f"  taille estimée de l'acteur : {h:.2f} m")
+    h = rig_height(X)
+    target = target_height_m(cfg, meta)
+    stats["actor_height_raw_m"] = h
+    if h is not None and target is not None:
+        s = target / h
+        X, cams, vol = scale_world(X, cams, vol, s)
+        stats["scale_applied"] = s
+        h = rig_height(X)
+        log(f"  taille de l'acteur : {h * 100:.0f} cm (indiquée), mise à l'échelle × {s:.3f}")
+    elif h is not None:
+        log(f"  taille de l'acteur mesurée : {h * 100:.0f} cm (aucune taille indiquée)")
         if not 1.35 <= h <= 2.15:
-            log(f"  ATTENTION : taille peu plausible. Les distances entre boules de studio.json ne "
-                f"correspondent sans doute pas à la réalité (facteur ≈ {1.75 / h:.2f} si vous mesurez "
-                "environ 1,75 m). Mesurez-les au mètre ruban et corrigez studio.json.")
+            log("  ATTENTION : taille peu plausible. Indiquez la taille de l'acteur en cm dans "
+                "MocapCam Studio : le squelette sera mis à la bonne taille.")
+    stats["actor_height_m"] = h
     name = os.path.basename(os.path.normpath(take_dir))
     # points 3D bruts : données de travail (dans mocapcam/), d'où est tiré le FBX
     out = export_motion(os.path.join(work, f"{name}.mocap.json"), X, fps, cams, cfg, vol, stats)
@@ -402,6 +592,12 @@ def process_take(studio_dir, take_dir, force=False, manual_delays=None, only_cal
     if cfg.get("fbx", True):
         result = fbx.export(out, os.path.join(take_dir, f"{name}.fbx"),
                             blender=cfg.get("blender") or None, log=log) or out
+    cid = cfg.get("character")
+    if cid and result.endswith(".fbx"):
+        try:
+            animate_character(take_dir, studio_dir, cid, log=log, blender=cfg.get("blender") or None)
+        except (RuntimeError, FileNotFoundError) as e:
+            log(f"  personnage non animé : {e}")
     log(f"Terminé en {time.time() - t0:.0f} s -> {result}")
     log(f"  couverture corps {stats['coverage_body'] * 100:.0f} %, mains {stats['coverage_hands'] * 100:.0f} %")
     return result

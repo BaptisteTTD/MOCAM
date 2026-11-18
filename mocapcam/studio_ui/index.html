@@ -6,134 +6,311 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root {
-    --bg: #0f1115; --panel: #171a21; --panel2: #1e222b; --line: #2a2f3a;
-    --text: #e8eaf0; --muted: #8b93a7; --accent: #4c8dff; --ok: #35c46a; --warn: #f0a92e; --err: #ff5a5a;
-    --rec: #ff3b30;
+    --ink-0: #14171d; --ink-1: #1a1e26; --ink-2: #222833; --ink-3: #2b3240; --line: #2f3644; --line-2: #3b4352;
+    --text: #e9ecf2; --muted: #9aa3b4; --faint: #6c7586;
+    /* les quatre couleurs des boules au sol : elles portent aussi le sens (ok, attention, erreur, action) */
+    --ball-red: #e8504a; --ball-green: #33b574; --ball-blue: #4f80f4; --ball-yellow: #f2c14e;
+    --ok: var(--ball-green); --warn: var(--ball-yellow); --err: var(--ball-red); --act: var(--ball-blue);
+    --tally: #ff3b30;
+    --r-panel: 12px; --r-ctl: 8px; --r-view: 6px;
+    --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    --display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, sans-serif; }
-  header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
-  header h1 { font-size: 18px; margin: 0; font-weight: 650; letter-spacing: .2px; }
-  .chip { padding: 3px 10px; border-radius: 99px; background: var(--panel2); color: var(--muted); font-size: 12px; }
-  .chip.ok { color: var(--ok); } .chip.warn { color: var(--warn); } .chip.err { color: var(--err); }
-  main { display: grid; grid-template-columns: 1fr 380px; gap: 16px; padding: 16px 20px; height: calc(100vh - 53px); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 14px; align-content: start; overflow: auto; padding-bottom: 20px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
-  .card.recording { border-color: var(--rec); box-shadow: 0 0 0 1px var(--rec); }
-  .view { position: relative; aspect-ratio: 16/9; background: #000; display: flex; align-items: center; justify-content: center; }
-  .view img { width: 100%; height: 100%; object-fit: contain; }
-  .view .name { position: absolute; left: 10px; top: 8px; font-size: 18px; font-weight: 700; text-shadow: 0 1px 4px #000; }
-  .view .rec { position: absolute; right: 10px; top: 8px; color: var(--rec); font-weight: 700; display: none; }
-  .card.recording .rec { display: block; }
-  .view .nopreview { color: var(--muted); }
-  .view .paused { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 10px; background: #000a; color: #ddd; font-size: 12.5px; text-align: center; }
-  .meta { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 10px 12px 4px; color: var(--muted); font-size: 12.5px; }
-  .meta b { color: var(--text); font-weight: 600; }
-  .meta .bad { color: var(--err); } .meta .good { color: var(--ok); } .meta .mid { color: var(--warn); }
-  .actions { display: flex; gap: 6px; padding: 8px 12px 12px; flex-wrap: wrap; align-items: center; }
-  button { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; font: inherit; cursor: pointer; }
-  button:hover { border-color: #3d4554; }
-  button:disabled { opacity: .45; cursor: default; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-  button.recbtn { background: var(--rec); border-color: var(--rec); color: #fff; font-weight: 700; font-size: 16px; padding: 12px; width: 100%; }
-  button.stopbtn { background: #fff; color: #000; font-weight: 700; font-size: 16px; padding: 12px; width: 100%; }
-  .check { font-size: 12.5px; padding: 0 12px 8px; }
-  .check a { color: var(--accent); cursor: pointer; }
-  .check .good { color: var(--ok); } .check .bad { color: var(--err); } .warnc { color: var(--warn); }
-  .add { display: flex; gap: 16px; padding: 14px; align-items: center; }
-  .add img { width: 190px; height: 190px; background: #fff; border-radius: 8px; }
-  .add ol { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
-  .side { display: flex; flex-direction: column; gap: 14px; overflow: auto; }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
-  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
-  label { display: flex; align-items: center; gap: 8px; color: var(--muted); margin: 6px 0; }
-  input[type=text] { background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 8px 10px; font: inherit; width: 100%; }
-  .row { display: flex; gap: 8px; align-items: center; }
-  input.num { background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 6px 8px; font: inherit; width: 76px; }
-  .timer { font: 600 34px/1 "Cascadia Mono", Consolas, monospace; text-align: center; margin: 8px 0 12px; }
-  .timer.on { color: var(--rec); }
-  .progress { height: 6px; background: var(--panel2); border-radius: 3px; overflow: hidden; margin-top: 4px; }
-  .progress > div { height: 100%; background: var(--accent); }
-  .log { background: #0b0d11; border: 1px solid var(--line); border-radius: 8px; height: 220px; overflow: auto; padding: 8px; font: 12px/1.45 Consolas, monospace; white-space: pre-wrap; color: #c9d1e3; }
-  .takes { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow: auto; }
-  .take { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--panel2); border-radius: 8px; }
-  .take .n { font-weight: 600; flex: 1; }
-  .take .s { font-size: 12px; color: var(--muted); }
-  .take .done { color: var(--ok); }
-  .hint { color: var(--muted); font-size: 12.5px; margin: 6px 0 0; }
-  #toasts { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; z-index: 10; }
-  .toast { background: #222836; border: 1px solid var(--line); padding: 8px 14px; border-radius: 8px; box-shadow: 0 6px 20px #0008; }
-  .toast.warn { border-color: var(--warn); } .toast.error { border-color: var(--err); }
-  #modal { position: fixed; inset: 0; background: #000c; display: none; align-items: center; justify-content: center; z-index: 20; }
-  #modal img { max-width: 92vw; max-height: 88vh; border-radius: 8px; }
-  #disc { position: fixed; inset: 0; background: #000b; display: none; align-items: center; justify-content: center; font-size: 18px; z-index: 30; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--ink-0); color: var(--text); font: 14px/1.45 var(--ui); font-variant-numeric: tabular-nums; }
+  button, input, select { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--act); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+  /* ---------------------------------------------------------------- barre du haut */
+  .top { display: flex; align-items: center; gap: 18px; height: 56px; padding: 0 18px; border-bottom: 1px solid var(--line); background: var(--ink-1); }
+  .brand { display: flex; align-items: center; gap: 10px; font: 650 16px/1 var(--display); letter-spacing: .1px; white-space: nowrap; }
+  .tabs { display: flex; gap: 4px; margin-left: 14px; }
+  .tab { background: none; border: 0; padding: 8px 14px; border-radius: var(--r-ctl); color: var(--muted); cursor: pointer; font-weight: 550; }
+  .tab:hover { color: var(--text); background: var(--ink-2); }
+  .tab[aria-selected="true"] { color: var(--text); background: var(--ink-3); }
+  .tab .count { margin-left: 6px; color: var(--faint); font-weight: 500; }
+  .top .spacer { flex: 1; }
+  .net { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .net b { color: var(--text); font-weight: 600; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--faint); flex: none; }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.err { background: var(--err); }
+  .iconbtn { background: none; border: 1px solid transparent; border-radius: var(--r-ctl); padding: 6px 9px; cursor: pointer; color: var(--muted); }
+  .iconbtn:hover { border-color: var(--line-2); color: var(--text); }
+
+  /* ---------------------------------------------------------------- boutons, champs */
+  .btn { background: var(--ink-2); border: 1px solid var(--line-2); border-radius: var(--r-ctl); padding: 7px 13px; cursor: pointer; white-space: nowrap; }
+  .btn:hover:not(:disabled) { background: var(--ink-3); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn.primary { background: var(--act); border-color: var(--act); color: #fff; font-weight: 600; }
+  .btn.primary:hover:not(:disabled) { background: #5d8bf7; }
+  .btn.danger { color: #ff8c86; }
+  .btn.small { padding: 4px 10px; font-size: 13px; }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field > span { color: var(--muted); font-size: 13px; }
+  .input { background: var(--ink-0); border: 1px solid var(--line-2); border-radius: var(--r-ctl); padding: 8px 10px; width: 100%; }
+  .input:focus { border-color: var(--act); outline: none; }
+  .unit { position: relative; }
+  .unit .input { padding-right: 36px; }
+  .unit::after { content: attr(data-unit); position: absolute; right: 11px; top: 50%; transform: translateY(-50%); color: var(--faint); pointer-events: none; }
+  .seg { display: inline-flex; background: var(--ink-0); border: 1px solid var(--line-2); border-radius: var(--r-ctl); padding: 2px; }
+  .seg button { background: none; border: 0; border-radius: 6px; padding: 4px 10px; cursor: pointer; color: var(--muted); font-size: 13px; }
+  .seg button[aria-pressed="true"] { background: var(--ink-3); color: var(--text); font-weight: 600; }
+  .seg button:disabled { opacity: .4; cursor: default; }
+  .hint { color: var(--muted); font-size: 13px; margin: 0; }
+  .ok-t { color: var(--ok); } .warn-t { color: var(--warn); } .err-t { color: #ff8c86; }
+  a.link, button.link { color: #8fb0ff; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; font-size: inherit; }
+
+  /* ---------------------------------------------------------------- pages */
+  .page { display: none; height: calc(100vh - 56px); }
+  .page.on { display: grid; }
+  #pCams { grid-template-columns: 1fr 360px; }
+  #pTakes { grid-template-columns: 340px 1fr; }
+  #pChars { grid-template-columns: 1fr; overflow: auto; }
+  .scroll { overflow: auto; padding: 18px; }
+
+  /* ---------------------------------------------------------------- caméras */
+  .cams { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 16px; align-content: start; }
+  .cam { background: var(--ink-1); border: 1px solid var(--line); border-radius: var(--r-panel); overflow: hidden; }
+  .cam.rec { border-color: var(--tally); box-shadow: 0 0 0 1px var(--tally) inset; }
+  .cam-h { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
+  .cam-h .nm { font: 650 17px/1.2 var(--display); }
+  .cam-h .md { color: var(--faint); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cam-h .spacer { flex: 1; }
+  .vitals { display: flex; gap: 12px; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+  .vitals b { color: var(--text); font-weight: 600; }
+  .view { position: relative; aspect-ratio: 16 / 9; background: #000; margin: 0 12px; border-radius: var(--r-view); overflow: hidden; display: grid; place-items: center; }
+  .view.r43 { aspect-ratio: 4 / 3; }
+  .view img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .view .wait { color: var(--faint); }
+  .view .tally { position: absolute; top: 8px; left: 8px; background: var(--tally); color: #fff; font-weight: 700; font-size: 12px; padding: 3px 8px; border-radius: 4px; display: none; }
+  .cam.rec .view .tally { display: block; }
+  .view .over { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 10px; background: #000b; color: #ddd; font-size: 12.5px; text-align: center; }
+  .cam-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px 0; flex-wrap: wrap; }
+  .cam-row .lbl { color: var(--muted); font-size: 13px; min-width: 104px; }
+  .balls-line { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; font-size: 13px; }
+  .balls-line .msg { min-width: 0; flex: 1; }
+  .balls-line .msg .w { display: block; font-size: 12.5px; }
+  .square { width: 34px; height: 34px; position: relative; flex: none; }
+  .square i { position: absolute; width: 9px; height: 9px; border-radius: 50%; transform: translate(-50%, -50%); }
+  .square i.off { background: transparent !important; box-shadow: inset 0 0 0 1.5px var(--faint); }
+  .square.pending i { opacity: .35; }
+  .specs { display: grid; grid-template-columns: repeat(4, auto); gap: 2px 16px; padding: 10px 12px 12px; color: var(--muted); font-size: 12.5px; justify-content: start; }
+  .specs b { color: var(--text); font-weight: 600; display: block; }
+  .cam-f { display: flex; gap: 8px; padding: 0 12px 12px; align-items: center; }
+  .cam-f .spacer { flex: 1; }
+  .progress { height: 6px; background: var(--ink-3); border-radius: 3px; overflow: hidden; }
+  .progress > div { height: 100%; background: var(--act); transition: width .3s; }
+
+  .add { background: var(--ink-1); border: 1px dashed var(--line-2); border-radius: var(--r-panel); padding: 18px; display: grid; grid-template-columns: 210px 1fr; gap: 20px; align-items: start; }
+  .add .qr { width: 210px; height: 210px; background: #fff; border-radius: 10px; padding: 6px; }
+  .add h3 { margin: 2px 0 10px; font: 650 17px/1.3 var(--display); }
+  .add ol { margin: 0 0 12px; padding-left: 20px; color: var(--muted); }
+  .add ol li { margin: 4px 0; } .add ol b { color: var(--text); font-weight: 600; }
+  .alert { border: 1px solid var(--warn); background: #f2c14e14; border-radius: var(--r-ctl); padding: 10px 12px; font-size: 13px; display: flex; gap: 12px; align-items: center; margin-top: 10px; }
+  .alert.err { border-color: var(--err); background: #e8504a14; }
+
+  /* ---------------------------------------------------------------- tournage (colonne de droite) */
+  .shoot { border-left: 1px solid var(--line); background: var(--ink-1); display: flex; flex-direction: column; overflow: auto; }
+  .slate { padding: 18px; border-bottom: 1px solid var(--line); display: grid; gap: 12px; transition: background .25s; }
+  .slate.rec { background: #3a1414; }
+  .slate .row2 { display: grid; grid-template-columns: 1fr 120px; gap: 10px; }
+  .timecode { font: 600 54px/1 var(--display); letter-spacing: 1px; text-align: center; padding: 6px 0 2px; color: var(--text); }
+  .slate.rec .timecode { color: #fff; }
+  .recbtn { width: 100%; border: 0; border-radius: 10px; padding: 15px; font: 700 17px/1 var(--ui); cursor: pointer; background: var(--tally); color: #fff; display: flex; align-items: center; justify-content: center; gap: 10px; }
+  .recbtn::before { content: ""; width: 14px; height: 14px; border-radius: 50%; background: #fff; }
+  .recbtn.stop { background: #fff; color: #111; }
+  .recbtn.stop::before { border-radius: 2px; background: #111; }
+  .recbtn:disabled { opacity: .4; cursor: default; }
+  .checks { padding: 14px 18px; display: grid; gap: 2px; }
+  .checks h2, .side-h { font: 600 14px/1.3 var(--ui); margin: 0 0 6px; color: var(--muted); }
+  .chk { display: grid; grid-template-columns: 18px 1fr auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .chk:last-child { border-bottom: 0; }
+  .chk .t { font-size: 13.5px; } .chk .d { color: var(--muted); font-size: 12.5px; }
+  .chk .mark { width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; color: #111; font-weight: 800; }
+  .chk .mark.ok { background: var(--ok); } .chk .mark.warn { background: var(--warn); } .chk .mark.err { background: var(--err); }
+  .chk .mark.ok::after { content: "✓"; } .chk .mark.warn::after { content: "!"; } .chk .mark.err::after { content: "×"; color: #fff; }
+  .opts { display: grid; gap: 6px; padding: 0 18px 16px; color: var(--muted); font-size: 13px; }
+  .opts label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+
+  /* ---------------------------------------------------------------- prises */
+  .takes-list { border-right: 1px solid var(--line); overflow: auto; background: var(--ink-1); }
+  .tk { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 11px 16px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .tk:hover { background: var(--ink-2); }
+  .tk[aria-selected="true"] { background: var(--ink-3); box-shadow: inset 3px 0 0 var(--act); }
+  .tk .n { font-weight: 600; } .tk .s { color: var(--muted); font-size: 12.5px; }
+  .tk .st { justify-self: end; font-size: 12.5px; }
+  .detail { overflow: auto; padding: 20px 24px; display: grid; gap: 18px; align-content: start; }
+  .detail h1 { font: 650 24px/1.2 var(--display); margin: 0; }
+  .detail .sub { color: var(--muted); margin-top: 4px; }
+  .grid2 { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); gap: 18px; align-items: start; }
+  .panel { background: var(--ink-1); border: 1px solid var(--line); border-radius: var(--r-panel); padding: 16px; display: grid; gap: 12px; }
+  .viewer { position: relative; aspect-ratio: 16 / 10; background: radial-gradient(ellipse at 50% 35%, #232a36 0%, #151920 70%); border-radius: var(--r-view); overflow: hidden; }
+  .viewer canvas { display: block; width: 100% !important; height: 100% !important; }
+  .viewer .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); text-align: center; padding: 20px; }
+  .player { display: flex; gap: 10px; align-items: center; }
+  .player input[type=range] { flex: 1; accent-color: var(--act); }
+  .player .time { color: var(--muted); font-size: 13px; min-width: 92px; text-align: right; }
+  .steps { display: grid; gap: 6px; counter-reset: st; }
+  .step { display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: center; font-size: 13.5px; color: var(--faint); }
+  .step .n { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--line-2); display: grid; place-items: center; font-size: 11.5px; font-weight: 700; }
+  .step.done { color: var(--muted); } .step.done .n { background: var(--ok); border-color: var(--ok); color: #0b1a10; }
+  .step.cur { color: var(--text); } .step.cur .n { border-color: var(--act); color: var(--act); animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 4px #4f80f433; } }
+  .files { display: grid; gap: 8px; }
+  .file { display: flex; gap: 10px; align-items: center; font-size: 13.5px; }
+  .file .ext { font-size: 11px; font-weight: 700; color: var(--muted); border: 1px solid var(--line-2); border-radius: 4px; padding: 1px 5px; }
+  details.log summary { cursor: pointer; color: var(--muted); }
+  .logbox { background: #0e1015; border: 1px solid var(--line); border-radius: var(--r-ctl); height: 230px; overflow: auto; padding: 10px; font: 12px/1.5 "Cascadia Code", Consolas, monospace; white-space: pre-wrap; color: #c5cddc; margin-top: 8px; }
+  .row { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+
+  /* ---------------------------------------------------------------- personnages */
+  .chars { padding: 24px; display: grid; gap: 18px; max-width: 1280px; align-content: start; }
+  .drop { border: 1.5px dashed var(--line-2); border-radius: var(--r-panel); padding: 22px; display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center; background: var(--ink-1); }
+  .drop.over { border-color: var(--act); background: #4f80f412; }
+  .drop h2 { margin: 0 0 4px; font: 650 18px/1.3 var(--display); }
+  .char-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+  .char { background: var(--ink-1); border: 1px solid var(--line); border-radius: var(--r-panel); overflow: hidden; display: grid; }
+  .char.def { border-color: var(--act); }
+  .char .thumb { aspect-ratio: 1; background: radial-gradient(ellipse at 50% 30%, #252c39 0%, #161a21 75%); display: grid; place-items: center; color: var(--faint); }
+  .char .thumb img { width: 100%; height: 100%; object-fit: contain; }
+  .char .body { padding: 12px 14px 14px; display: grid; gap: 6px; }
+  .char .nm { font: 650 16px/1.25 var(--display); }
+  .char .meta { color: var(--muted); font-size: 12.5px; }
+  .char .acts { display: flex; gap: 8px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+
+  /* ---------------------------------------------------------------- réglages, fenêtres */
+  .drawer { position: fixed; top: 56px; right: 0; bottom: 0; width: 380px; background: var(--ink-1); border-left: 1px solid var(--line); padding: 20px; display: none; z-index: 15; overflow: auto; box-shadow: -10px 0 30px #0007; }
+  .drawer.on { display: grid; align-content: start; gap: 18px; }
+  .drawer h2 { margin: 0; font: 650 18px/1.3 var(--display); }
+  .drawer section { display: grid; gap: 8px; }
+  .drawer h3 { margin: 0; font-size: 13.5px; color: var(--muted); font-weight: 600; }
+  .drawer label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+  #toasts { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 40; align-items: center; }
+  .toast { background: #262d39; border: 1px solid var(--line-2); padding: 9px 16px; border-radius: 9px; box-shadow: 0 8px 24px #0009; max-width: 720px; }
+  .toast.warn { border-color: var(--warn); } .toast.error { border-color: var(--err); } .toast.ok { border-color: var(--ok); }
+  .modal { position: fixed; inset: 0; background: #000c; display: none; align-items: center; justify-content: center; z-index: 30; }
+  .modal.on { display: flex; }
+  .modal img { max-width: 92vw; max-height: 88vh; border-radius: 8px; }
+  #disc { position: fixed; inset: 0; background: #0b0d12e6; display: none; align-items: center; justify-content: center; font-size: 17px; z-index: 50; text-align: center; padding: 30px; }
+  .empty-page { display: grid; place-items: center; color: var(--muted); padding: 40px; text-align: center; }
 </style>
 </head>
 <body>
-<header>
-  <h1>MocapCam Studio</h1>
-  <span class="chip" id="chipCams">0 caméra</span>
-  <span class="chip" id="chipSync">horloges —</span>
-  <span class="chip" id="chipState">prêt</span>
-  <span style="flex:1"></span>
-  <button onclick="send({a:'open'})">Dossier des prises</button>
+<header class="top">
+  <div class="brand">
+    <!-- logo : les cinq boules au sol (A rouge, B vert, C bleu, D jaune, E rouge au milieu de A-D) -->
+    <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+      <circle cx="4" cy="4" r="3" fill="#e8504a"/><circle cx="18" cy="4" r="3" fill="#33b574"/>
+      <circle cx="18" cy="18" r="3" fill="#4f80f4"/><circle cx="4" cy="18" r="3" fill="#f2c14e"/>
+      <circle cx="4" cy="11" r="2.2" fill="#e8504a"/>
+    </svg>
+    MocapCam Studio
+  </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab" role="tab" data-page="pCams" aria-selected="true">Tournage<span class="count" id="nCams"></span></button>
+    <button class="tab" role="tab" data-page="pTakes" aria-selected="false">Prises<span class="count" id="nTakes"></span></button>
+    <button class="tab" role="tab" data-page="pChars" aria-selected="false">Personnages<span class="count" id="nChars"></span></button>
+  </nav>
+  <span class="spacer"></span>
+  <span class="net" id="net"></span>
+  <button class="iconbtn" id="btnSettings" title="Réglages" aria-label="Réglages">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+  </button>
 </header>
-<main>
-  <section class="grid" id="grid"></section>
-  <aside class="side">
-    <div class="panel">
-      <h2>Prise</h2>
-      <input type="text" id="takeName" placeholder="prise_001">
-      <div class="timer" id="timer">00:00.0</div>
+
+<!-- ======================================================== Tournage -->
+<main class="page on" id="pCams">
+  <section class="scroll"><div class="cams" id="cams"></div></section>
+  <aside class="shoot">
+    <div class="slate" id="slate">
+      <div class="row2">
+        <label class="field"><span>Nom de la prise</span><input class="input" id="takeName" autocomplete="off"></label>
+        <label class="field"><span>Taille de l'acteur</span><span class="unit" data-unit="cm"><input class="input" id="actorH" type="number" min="50" max="260" step="1" placeholder="178"></span></label>
+      </div>
+      <div class="timecode" id="timer">00:00.0</div>
       <div id="recArea"></div>
       <div id="uploads"></div>
-      <p class="hint" id="recHint">Au départ, le PC émet un bip de synchronisation : gardez le son du PC allumé.</p>
     </div>
-    <div class="panel">
-      <h2>Préparation</h2>
-      <div class="row">
-        <button onclick="send({a:'check'})" style="flex:1">Vérifier les boules</button>
-        <button onclick="identifyAll()" style="flex:1">Identifier</button>
-      </div>
-      <div class="row" style="margin-top:8px">
-        <button onclick="send({a:'lock', fast: document.getElementById('fast').checked})" style="flex:1">Bloquer l'exposition</button>
-        <button onclick="send({a:'unlock'})" style="flex:1">Auto</button>
-      </div>
-      <label><input type="checkbox" id="fast" checked> obturation rapide 1/500 s (iPhone, réduit le flou)</label>
-      <label title="Si un téléphone ne fait pas 60 i/s en 1080p, il passe en 720p pour garder 60 i/s"><input type="checkbox" id="p60" onchange="send({a:'prefer60', value:this.checked})" checked> priorité à 60 i/s (720p si nécessaire)</label>
-      <div id="square" style="margin-top:10px" title="Distance mesurée au mètre ruban entre les centres des boules A (rouge) et B (verte). La boule E (rouge) est au milieu de A-D.">
-        <div class="row" style="color:var(--muted); white-space:nowrap">
-          <span>Carré des boules</span>
-          <input id="side" type="number" min="0.5" max="8" step="0.01" class="num">
-          <span>m</span>
-          <button onclick="saveSide()" style="margin-left:auto">Enregistrer</button>
-        </div>
-        <p class="hint" style="margin:4px 0 0">Côté mesuré au mètre ruban (diagonale = côté × 1,41).</p>
-      </div>
-      <label>Aperçu
-        <select id="pfps" onchange="send({a:'preview', fps: +this.value})">
-          <option value="0">coupé</option><option value="1">1 i/s</option><option value="3" selected>3 i/s</option><option value="6">6 i/s</option>
-        </select>
-      </label>
+    <div class="checks">
+      <h2>Avant de filmer</h2>
+      <div id="checklist"></div>
     </div>
-    <div class="panel">
-      <h2>Prises</h2>
-      <div class="takes" id="takes"></div>
-    </div>
-    <div class="panel">
-      <h2>Traitement</h2>
-      <div class="log" id="log">Les messages du traitement s'affichent ici.</div>
+    <div class="opts">
+      <label><input type="checkbox" id="fast" checked> Obturation rapide (1/500 s) au blocage de l'exposition</label>
+      <p class="hint">Le PC émet un bip au départ et à l'arrêt pour synchroniser les vidéos : gardez son haut-parleur allumé.</p>
     </div>
   </aside>
 </main>
-<div id="toasts"></div>
-<div id="modal" onclick="this.style.display='none'"><img id="modalImg"></div>
-<div id="disc">Connexion à MocapCam Studio perdue… (la fenêtre noire du serveur est-elle ouverte ?)</div>
+
+<!-- ======================================================== Prises -->
+<main class="page" id="pTakes">
+  <div class="takes-list" id="takesList"></div>
+  <section class="detail" id="takeDetail"></section>
+</main>
+
+<!-- ======================================================== Personnages -->
+<main class="page" id="pChars">
+  <div class="chars">
+    <div class="drop" id="drop">
+      <div>
+        <h2>Ajouter un personnage riggé</h2>
+        <p class="hint">Glissez le fichier ici : FBX, GLB/glTF, .blend, ou un .zip avec ses textures. Squelettes reconnus : Mixamo, Unreal, Character Creator, Biped, DAZ, VRoid, Rigify. Le personnage par défaut est animé à la fin de chaque traitement.</p>
+        <p class="hint err-t" id="noBlender" style="display:none;margin-top:6px">Blender est nécessaire pour lire les personnages : installez-le (gratuit), puis relancez MocapCam Studio.</p>
+        <p class="hint" id="charBusy" style="display:none;margin-top:6px"></p>
+      </div>
+      <div class="row">
+        <label class="field" style="width:200px"><span>Nom</span><input class="input" id="charName" placeholder="ex. Alpha"></label>
+        <label class="btn primary" for="charFile" style="display:inline-block">Choisir un fichier…</label>
+        <input type="file" id="charFile" accept=".fbx,.glb,.gltf,.blend,.zip" hidden>
+      </div>
+    </div>
+    <div class="char-grid" id="charGrid"></div>
+  </div>
+</main>
+
+<!-- ======================================================== Réglages -->
+<aside class="drawer" id="drawer" aria-label="Réglages">
+  <h2>Réglages</h2>
+  <section>
+    <h3>Vidéo</h3>
+    <label title="Si un téléphone ne fait pas 60 i/s en 1080p, il passe en 720p pour garder 60 i/s"><input type="checkbox" id="p60"> Priorité à 60 images/s (720p si nécessaire)</label>
+    <label>Aperçu des caméras
+      <select class="input" id="pfps" style="width:auto">
+        <option value="0">coupé</option><option value="1">1 image/s</option><option value="3">3 images/s</option><option value="6">6 images/s</option>
+      </select>
+    </label>
+  </section>
+  <section>
+    <h3>Réseau</h3>
+    <div id="netDetail" class="hint"></div>
+    <button class="btn" id="btnFirewall">Autoriser MocapCam dans le pare-feu</button>
+    <p class="hint">Utile sur un partage de connexion ou un réseau « public » : Windows demande l'accord de l'administrateur.</p>
+    <button class="btn" id="btnNewQr">Nouveau QR code</button>
+    <p class="hint">Les téléphones déjà connectés le restent ; les autres devront scanner le nouveau code.</p>
+  </section>
+  <section>
+    <h3>Dossiers</h3>
+    <div class="row"><button class="btn" data-open="">Prises</button><button class="btn" id="btnOpenChars">Personnages</button></div>
+    <p class="hint" id="paths"></p>
+  </section>
+</aside>
+
+<div id="toasts" aria-live="polite"></div>
+<div class="modal" id="modal"><img id="modalImg" alt="Image de vérification des boules"></div>
+<div id="disc">Connexion à MocapCam Studio perdue.<br>La fenêtre noire du serveur est-elle toujours ouverte ?</div>
 
 <script>
-let ws, S = null, serverDelta = 0, takeTyped = false;
+let ws, S = null, serverDelta = 0, takeTyped = false, selTake = null, logText = '';
+// aperçu 3D : remplacé par le module three.js dès qu'il est chargé
+window.mcViewer = window.mcViewer || { show() {}, toggle() { return true; }, seek() {} };
+window.mcRerender = () => { if (S) renderTakeDetail(true); };
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fr = (v, d = 1) => Number(v).toLocaleString('fr-FR', { maximumFractionDigits: d });
+const BALL = { rouge: 'var(--ball-red)', vert: 'var(--ball-green)', bleu: 'var(--ball-blue)', jaune: 'var(--ball-yellow)',
+               orange: '#f08a3c', violet: '#9b6cf0', rose: '#ef6fb0', blanc: '#eee' };
 
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws/ui`);
@@ -143,16 +320,16 @@ function connect() {
     const m = JSON.parse(ev.data);
     if (m.type === 'state') { S = m; serverDelta = m.now - Date.now(); render(); }
     else if (m.type === 'preview') { const img = document.querySelector(`img[data-prev="${m.cam}"]`); if (img) img.src = `/preview/${m.cam}?t=${m.ts}`; }
-    else if (m.type === 'log') { const l = $('log'); if (m.reset) l.textContent = ''; l.textContent += m.line + '\n'; l.scrollTop = l.scrollHeight; }
+    else if (m.type === 'log') { if (m.reset) logText = ''; logText += m.line + '\n'; const l = $('log'); if (l) { l.textContent = logText; l.scrollTop = l.scrollHeight; } }
     else if (m.type === 'toast') toast(m.msg, m.level);
     else if (m.type === 'play_chirp') playChirp();
   };
 }
 function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
-
+window.send = send;
 function toast(msg, level = 'info') {
   const d = document.createElement('div'); d.className = 'toast ' + level; d.textContent = msg;
-  $('toasts').appendChild(d); setTimeout(() => d.remove(), 5000);
+  $('toasts').appendChild(d); setTimeout(() => d.remove(), 6000);
 }
 
 // même signal que mocapcam/sync.py (chirp 1500 -> 6000 Hz, 0,3 s, fenêtre de Hann)
@@ -164,125 +341,370 @@ function playChirp() {
   for (let i = 0; i < n; i++) { const t = i / sr; d[i] = 0.9 * Math.sin(2 * Math.PI * (f0 * t + 0.5 * k * t * t)) * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1))); }
   const src = actx.createBufferSource(); src.buffer = buf; src.connect(actx.destination); src.start();
 }
+window.playChirp = playChirp;
 document.addEventListener('click', () => { actx = actx || new AudioContext(); actx.resume(); }, { once: true });
 
+// ---------------------------------------------------------------- onglets, réglages
+document.querySelectorAll('.tab').forEach(b => b.onclick = () => showPage(b.dataset.page));
+function showPage(id) {
+  document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', b.dataset.page === id));
+  document.querySelectorAll('.page').forEach(p => p.classList.toggle('on', p.id === id));
+  window.dispatchEvent(new Event('mc-page'));
+}
+$('btnSettings').onclick = () => $('drawer').classList.toggle('on');
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { $('drawer').classList.remove('on'); $('modal').classList.remove('on'); } });
+$('modal').onclick = () => $('modal').classList.remove('on');
+$('p60').onchange = (e) => send({ a: 'prefer60', value: e.target.checked });
+$('pfps').onchange = (e) => send({ a: 'preview', fps: +e.target.value });
+$('btnFirewall').onclick = () => { toast('Windows va demander l\'accord de l\'administrateur…'); send({ a: 'firewall' }); };
+$('btnNewQr').onclick = () => send({ a: 'new_qr' });
+$('btnOpenChars').onclick = () => send({ a: 'open_characters' });
+document.querySelector('[data-open]').onclick = () => send({ a: 'open' });
+$('takeName').addEventListener('input', () => takeTyped = true);
+let hTimer;
+$('actorH').addEventListener('input', () => { clearTimeout(hTimer); hTimer = setTimeout(saveHeight, 700); });
+$('actorH').addEventListener('change', saveHeight);
+function saveHeight() {
+  const v = $('actorH').value.trim();
+  if (v === '' || (+v >= 50 && +v <= 260)) send({ a: 'actor_height', cm: v === '' ? null : +v });
+}
+
+// ---------------------------------------------------------------- caméras
 function fmtRes(r) { if (!r || !r.width) return '?'; const w = Math.max(r.width, r.height), h = Math.min(r.width, r.height); return `${w}×${h}`; }
-function fmtBytes(b) { if (b == null) return '?'; return b > 1e9 ? (b / 1e9).toFixed(1) + ' Go' : (b / 1e6).toFixed(0) + ' Mo'; }
-function syncClass(ms) { return ms == null ? '' : ms < 30 ? 'good' : ms < 100 ? 'mid' : 'bad'; }
+function fmtBytes(b) { if (b == null) return '?'; return b > 1e9 ? fr(b / 1e9) + ' Go' : fr(b / 1e6, 0) + ' Mo'; }
+function syncCls(ms) { return ms == null ? '' : ms < 30 ? 'ok-t' : ms < 100 ? 'warn-t' : 'err-t'; }
+function fovOf(c) { return c.fov != null ? c.fov : (c.lens === 'ultra' ? 0.5 : 1); }
+function fovOptions(c) {
+  if (Array.isArray(c.fov_options) && c.fov_options.length) return c.fov_options;
+  return c.ultra_available ? [0.5, 1] : [1];
+}
+function fovLabel(v) { return '×' + fr(v, 1); }
+
+function ballSquare(chk) {
+  const balls = (chk && chk.balls) || [];
+  if (!balls.length) return '';
+  const xs = balls.map(b => b.p[0]), ys = balls.map(b => b.p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const miss = new Set(chk.missing || []);
+  const pending = chk.pending;
+  return `<span class="square ${pending ? 'pending' : ''}" title="${esc(balls.map(b => b.name + (miss.has(b.name) ? ' : non vue' : ' : vue')).join('\n'))}">${balls.map(b => {
+    const u = x1 > x0 ? (b.p[0] - x0) / (x1 - x0) : .5, v = y1 > y0 ? (b.p[1] - y0) / (y1 - y0) : .5;
+    return `<i class="${miss.has(b.name) || (!chk.ok && !pending) ? 'off' : ''}" style="left:${4 + u * 26}px;top:${30 - v * 26}px;background:${BALL[b.color] || '#ccc'}"></i>`;
+  }).join('')}</span>`;
+}
+
+function checkLine(c) {
+  const k = c.check;
+  if (!k) return `<span class="msg hint">Pas encore vérifiées</span><button class="btn small" onclick="send({a:'check',cam:'${c.id}'})">Vérifier</button>`;
+  if (k.pending) return `${ballSquare(lastBalls(c))}<span class="msg hint">${k.analysing ? 'Analyse de l\'image…' : k.tries > 1 ? `Image demandée (essai ${k.tries}/3)…` : 'Image demandée…'}</span>`;
+  const view = `<button class="link" onclick="showCheck('${c.id}')">Voir</button>`;
+  if (k.ok) {
+    const good = k.seen >= 4 && !k.note;
+    const warn = k.note ? 'Écart élevé : la disposition des boules ne correspond pas à celle prévue' : k.aligned ? 'Boules presque alignées : une 5e boule visible améliorerait la mesure' : '';
+    return `${ballSquare(k)}<span class="msg"><span class="${good ? 'ok-t' : 'warn-t'}">${k.seen} boules sur ${k.total}</span> <span class="hint">écart ${fr(k.rms)} px</span>${warn ? `<span class="w warn-t">${warn}</span>` : ''}</span>${view}<button class="btn small" onclick="send({a:'check',cam:'${c.id}'})">Revérifier</button>`;
+  }
+  return `${ballSquare(k)}<span class="msg err-t">${esc(k.message || 'Boules non trouvées')}</span>${k.size ? view : ''}<button class="btn small" onclick="send({a:'check',cam:'${c.id}'})">Réessayer</button>`;
+}
+const lastBallsCache = {};
+function lastBalls(c) { if (c.check && c.check.balls) lastBallsCache[c.id] = c.check; return Object.assign({ pending: true }, lastBallsCache[c.id] || {}); }
 
 function camCard(c) {
   const ex = c.exposure || {};
-  const exTxt = ex.duration ? `1/${Math.round(1 / ex.duration)} s · ISO ${Math.round(ex.iso)}` : '—';
+  const exTxt = ex.duration ? `1/${Math.round(1 / ex.duration)} s, ISO ${Math.round(ex.iso)}` : '—';
   const bat = c.battery >= 0 ? Math.round(c.battery * 100) + ' %' : '?';
-  const batCls = c.battery >= 0 && c.battery < 0.2 ? 'bad' : '';
-  const fpsCls = c.fps && c.fps < 50 ? 'mid' : 'good';
-  const stabCls = c.stabilization && c.stabilization !== 'off' ? 'bad' : 'good';
-  let chk = '';
-  if (c.check) {
-    if (c.check.pending) chk = 'Vérification des boules…';
-    else if (c.check.ok) chk = `<span class="${c.check.seen >= 4 ? 'good' : 'bad'}">● ${c.check.seen}/${c.check.total} boules</span> · erreur ${c.check.rms} px · caméra à (${c.check.center.join(' ; ')}) m · <a onclick="showCheck('${c.id}')">voir l'image</a>`
-      + (c.check.note ? `<br><span class="warnc">⚠ ${esc(c.check.note)}</span>` : '')
-      + (c.check.aligned ? `<br><span class="warnc">⚠ boules vues presque alignées : une 5e boule visible améliorerait la mesure</span>` : '');
-    else chk = `<span class="bad">● ${esc(c.check.message || 'boules non trouvées')}</span> · <a onclick="showCheck('${c.id}')">voir l'image</a>`;
-  }
   const tk = c.take || {};
+  const r43 = c.resolution && c.resolution.width && Math.abs(Math.max(c.resolution.width, c.resolution.height) / Math.min(c.resolution.width, c.resolution.height) - 4 / 3) < 0.05;
+  const fov = fovOf(c), opts = fovOptions(c);
   let up = '';
-  if (tk.state === 'uploading' && tk.total) up = `<div class="progress"><div style="width:${(100 * tk.sent / tk.total).toFixed(0)}%"></div></div>`;
-  return `<div class="card ${c.recording ? 'recording' : ''}" id="card-${c.id}">
-    <div class="view">
-      ${c.preview_ts ? `<img data-prev="${c.id}" src="/preview/${c.id}?t=${c.preview_ts}">` : '<span class="nopreview">en attente de l\'image…</span>'}
-      <div class="name">${esc(c.name)}</div><div class="rec">● REC</div>
-      ${c.recording && c.platform === 'ios' ? '<div class="paused">aperçu en pause pendant l\'enregistrement (iPhone)</div>' : ''}
+  if (tk.state === 'uploading' && tk.total) up = `<div style="padding:10px 12px 0"><div class="progress"><div style="width:${(100 * tk.sent / tk.total).toFixed(0)}%"></div></div></div>`;
+  return `<article class="cam ${c.recording ? 'rec' : ''}" id="card-${c.id}">
+    <div class="cam-h">
+      <div style="min-width:0"><div class="nm">${esc(c.name)}</div><div class="md">${esc(c.device || c.model || c.platform)}</div></div>
+      <span class="spacer"></span>
+      <div class="vitals">
+        <span>${c.fps != null ? `<b class="${c.fps < 50 ? 'warn-t' : ''}">${c.fps}</b> i/s` : '… i/s'}</span>
+        <span title="précision de la mise à l'heure ; la synchro finale se fait au bip">horloge <b class="${syncCls(c.sync_ms)}">${c.sync_ms != null ? '±' + fr(c.sync_ms) + ' ms' : '…'}</b></span>
+        <span>batterie <b class="${c.battery >= 0 && c.battery < .2 ? 'err-t' : ''}">${bat}</b></span>
+      </div>
     </div>
-    <div class="meta">
-      <span>${esc(c.platform)} ${esc(c.device || c.model || '')}</span>
-      <span>i/s <b class="${fpsCls}">${c.fps ?? '?'}</b></span>
-      <span>format <b class="${c.res720 ? 'mid' : ''}">${fmtRes(c.resolution)}</b></span>
-      <span>objectif <b>${c.lens === 'ultra' ? '×0,5' : '×1'}</b></span>
-      <span>stabilisation <b class="${stabCls}">${esc(c.stabilization ?? '?')}</b></span>
-      <span title="précision de la mise à l'heure ; la synchro finale se fait au bip, à moins d'1 ms">horloge <b class="${syncClass(c.sync_ms)}">${c.sync_ms != null ? '±' + c.sync_ms + ' ms' : '…'}</b></span>
-      <span>batterie <b class="${batCls}">${bat}</b></span>
-      <span>libre <b>${fmtBytes(c.storage_free)}</b></span>
-      <span>expo <b>${exTxt}</b> ${c.locked ? '<b class="good">bloquée</b>' : ''}</span>
+    <div class="view ${r43 ? 'r43' : ''}">
+      ${c.preview_ts ? `<img data-prev="${c.id}" src="/preview/${c.id}?t=${c.preview_ts}" alt="Aperçu de ${esc(c.name)}">` : '<span class="wait">En attente de l\'image…</span>'}
+      <span class="tally">REC</span>
+      ${c.recording && c.platform === 'ios' ? '<div class="over">Aperçu en pause pendant l\'enregistrement (iPhone)</div>' : ''}
     </div>
-    ${chk ? `<div class="check">${chk}</div>` : ''}
-    <div style="padding:0 12px">${up}</div>
-    <div class="actions">
-      <button onclick="send({a:'identify', cam:'${c.id}'})">Identifier</button>
-      <button title="${c.ultra_available ? 'Changer d\'objectif' : 'Ultra grand-angle non disponible sur ce téléphone'}" ${c.ultra_available || c.lens === 'ultra' ? '' : 'disabled'} ${c.recording ? 'disabled' : ''}
-        onclick="send({a:'lens', cam:'${c.id}', value:'${c.lens === 'ultra' ? 'wide' : 'ultra'}'})">${c.lens === 'ultra' ? 'Objectif ×0,5 → ×1' : 'Objectif ×1 → ×0,5'}</button>
-      <button onclick="rename('${c.id}','${esc(c.name)}')">Renommer</button>
-      <span style="flex:1"></span>
-      <span class="s" style="color:var(--muted)">${tk.state ? esc(stateFr(tk.state)) : ''}</span>
-      <button onclick="if(confirm('Déconnecter ${esc(c.name)} ?')) send({a:'kick', cam:'${c.id}'})">✕</button>
+    <div class="cam-row">
+      <span class="lbl">Champ de vision</span>
+      <span class="seg" role="group" aria-label="Champ de vision">${opts.map(v => `<button aria-pressed="${Math.abs(v - fov) < 0.01}" ${c.recording ? 'disabled' : ''} onclick="send({a:'fov',cam:'${c.id}',value:${v}})">${fovLabel(v)}</button>`).join('')}</span>
+      ${opts.length === 1 ? '<span class="hint">Mettez l\'app à jour pour changer le champ</span>' : ''}
+    </div>
+    <div class="cam-row"><span class="lbl">Boules au sol</span><span class="balls-line">${checkLine(c)}</span></div>
+    ${up}
+    <div class="specs">
+      <span>format<b class="${c.res720 ? 'warn-t' : ''}">${fmtRes(c.resolution)}</b></span>
+      <span>stabilisation<b class="${c.stabilization && c.stabilization !== 'off' ? 'err-t' : ''}">${esc(c.stabilization ?? '?')}</b></span>
+      <span>exposition<b>${exTxt}${c.locked ? ' <span class="ok-t">bloquée</span>' : ''}</b></span>
+      <span>stockage libre<b>${fmtBytes(c.storage_free)}</b></span>
+    </div>
+    <div class="cam-f">
+      <button class="btn small" onclick="send({a:'identify',cam:'${c.id}'})">Identifier</button>
+      <button class="btn small" onclick="renameCam('${c.id}','${esc(c.name)}')">Renommer</button>
+      <span class="spacer"></span>
+      <span class="hint">${tk.state ? esc(stateFr(tk.state)) : ''}</span>
+      <button class="btn small danger" onclick="if(confirm('Déconnecter ${esc(c.name)} ?')) send({a:'kick',cam:'${c.id}'})">Déconnecter</button>
+    </div>
+  </article>`;
+}
+function stateFr(s) { return ({ armed: 'prêt', recording: 'enregistre', uploading: 'envoi de la vidéo', done: 'vidéo reçue', error: 'erreur d\'envoi' })[s] || s; }
+
+function addCard() {
+  const n = S.net || {};
+  const real = (n.adapters || []).length;
+  let alert = '';
+  if (n.public && n.firewall_rule === false)
+    alert = `<div class="alert"><span>Ce réseau est classé « public » par Windows : il peut bloquer les téléphones (partage de connexion notamment).</span><button class="btn small" onclick="toast('Windows va demander l\\'accord de l\\'administrateur…');send({a:'firewall'})">Autoriser MocapCam</button></div>`;
+  if (!real) alert += `<div class="alert err"><span>Le PC n'est connecté à aucun réseau : connectez-le au Wi-Fi, ou au partage de connexion d'un téléphone.</span></div>`;
+  return `<div class="add">
+    <img class="qr" src="/qr.svg?k=${S.qr_key}" alt="QR code de connexion">
+    <div>
+      <h3>${S.cams.length ? 'Ajouter un autre téléphone' : 'Connecter les téléphones'}</h3>
+      <ol>
+        <li>Mettez le téléphone sur ${n.ssid ? `le Wi-Fi <b>${esc(n.ssid)}</b>` : 'le même réseau que ce PC'}. Le partage de connexion d'un des téléphones marche aussi : branchez-y le PC.</li>
+        <li>Ouvrez l'app <b>MocapCam</b> et donnez un nom à la caméra.</li>
+        <li>Scannez ce code.</li>
+      </ol>
+      <p class="hint">Le téléphone qui partage sa connexion peut filmer lui aussi.</p>
+      ${alert}
     </div>
   </div>`;
 }
-function stateFr(s) { return ({armed:'prêt', recording:'enregistre', uploading:'envoi de la vidéo', done:'vidéo reçue', error:'erreur'})[s] || s; }
 
-function addCard() {
-  const q = S.qr;
-  return `<div class="card"><div class="add">
-    <img src="/qr.svg?t=${q.token}" alt="QR code">
-    <div><b>Ajouter une caméra</b>
-      <ol><li>Ouvrez l'app <b>MocapCam</b> sur le téléphone</li>
-      <li>Donnez-lui un nom (iphone, poco…)</li>
-      <li>Scannez ce QR code</li></ol>
-      <p class="hint">Même réseau Wi-Fi que ce PC. Sans QR code, tapez dans l'app :<br>
-        <b style="color:var(--text);font-family:Consolas,monospace">${q.hosts.map(h => h + ':' + q.port + ' ' + q.token).join('</b> ou <b style="color:var(--text);font-family:Consolas,monospace">')}</b></p>
-      <button onclick="send({a:'new_qr'})">Nouveau QR code</button>
-    </div></div></div>`;
+let lastCamsKey = '';
+function renderCams() {
+  const cams = S.cams;
+  const key = JSON.stringify(cams.map(c => [c.id, c.name, c.fps, c.resolution, c.res720, c.fov, c.fov_options, c.lens, c.ultra_available, c.stabilization, c.sync_ms, Math.round((c.battery || 0) * 100), c.recording, c.locked, c.check, c.take, c.exposure && Math.round(1 / (c.exposure.duration || 1)), c.preview_ts ? 1 : 0, c.storage_free && Math.round(c.storage_free / 1e8), c.device])) + S.qr_key + JSON.stringify(S.net);
+  if (key === lastCamsKey) return;
+  lastCamsKey = key;
+  $('cams').innerHTML = cams.map(camCard).join('') + addCard();
 }
 
-let lastGridKey = '';
-function render() {
-  const cams = S.cams;
-  // grille : on ne reconstruit pas les images à chaque mise à jour
-  const key = JSON.stringify(cams.map(c => [c.id, c.name, c.fps, c.resolution, c.res720, c.lens, c.ultra_available, c.stabilization, c.sync_ms, Math.round((c.battery||0)*100), c.recording, c.locked, c.check, c.take, c.exposure && Math.round(1/(c.exposure.duration||1)), c.preview_ts ? 1 : 0, c.storage_free && Math.round(c.storage_free/1e8)])) + S.qr.token;
-  if (key !== lastGridKey) { lastGridKey = key; $('grid').innerHTML = cams.map(camCard).join('') + addCard(); }
-
-  if (document.activeElement !== $('p60')) $('p60').checked = !!S.prefer60;
-  const L = S.layout || {};
-  $('square').style.display = L.standard === false && L.side === undefined ? 'none' : '';
-  if (document.activeElement !== $('side') && L.side !== undefined) $('side').value = L.side.toFixed(2);
-  if (document.activeElement !== $('pfps')) $('pfps').value = String(S.preview_fps);
-  $('chipCams').textContent = `${cams.length} caméra${cams.length > 1 ? 's' : ''}`;
-  $('chipCams').className = 'chip ' + (cams.length >= 2 ? 'ok' : cams.length ? 'warn' : 'err');
-  const worst = Math.max(...cams.map(c => c.sync_ms ?? 999), 0);
-  $('chipSync').textContent = cams.length ? `horloges ±${worst === 999 ? '…' : worst} ms` : 'horloges —';
-  $('chipSync').className = 'chip ' + (worst < 30 ? 'ok' : worst < 100 ? 'warn' : 'err');
-
-  const tk = S.take, st = tk ? tk.state : 'idle';
+// ---------------------------------------------------------------- tournage
+function chkRow(state, title, detail, action = '') {
+  return `<div class="chk"><span class="mark ${state}"></span><div><div class="t">${title}</div>${detail ? `<div class="d">${detail}</div>` : ''}</div><div>${action}</div></div>`;
+}
+function renderShoot() {
+  const cams = S.cams, tk = S.take, st = tk ? tk.state : 'idle';
   const recording = st === 'starting' || st === 'recording';
-  $('chipState').textContent = ({idle:'prêt', starting:'démarrage…', recording:'● enregistrement', stopping:'arrêt, envoi des vidéos…', ready:'prise reçue'})[st] || st;
-  $('chipState').className = 'chip ' + (recording ? 'err' : st === 'stopping' ? 'warn' : 'ok');
+  $('slate').classList.toggle('rec', recording);
   if (tk && ['starting', 'recording', 'stopping'].includes(st)) $('takeName').value = tk.name;
   else if (!takeTyped || !$('takeName').value) $('takeName').value = S.next_take;
   $('takeName').disabled = recording || st === 'stopping';
+  if (document.activeElement !== $('actorH')) $('actorH').value = S.actor_height_cm ?? '';
   $('recArea').innerHTML = recording
-    ? `<button class="stopbtn" onclick="send({a:'stop'})">■ Arrêter</button>`
-    : `<button class="recbtn" ${cams.length && st !== 'stopping' ? '' : 'disabled'} onclick="record()">● Enregistrer</button>`;
-  $('timer').className = 'timer' + (recording ? ' on' : '');
+    ? `<button class="recbtn stop" onclick="send({a:'stop'})">Arrêter</button>`
+    : `<button class="recbtn" ${cams.length && st !== 'stopping' ? '' : 'disabled'} onclick="record()">${st === 'stopping' ? 'Envoi des vidéos…' : 'Enregistrer'}</button>`;
+  // envois en cours
+  const ups = cams.filter(c => c.take && c.take.state === 'uploading' && c.take.total);
+  $('uploads').innerHTML = ups.map(c => `<div class="hint" style="display:grid;gap:4px">${esc(c.name)} : envoi de la vidéo<div class="progress"><div style="width:${(100 * c.take.sent / c.take.total).toFixed(0)}%"></div></div></div>`).join('');
 
-  $('takes').innerHTML = S.takes.length ? S.takes.map(t => `<div class="take">
-      <span class="n">${esc(t.name)}</span>
-      <span class="s">${t.videos.length} vidéo${t.videos.length > 1 ? 's' : ''}${t.duration ? ' · ' + t.duration + ' s' : ''}</span>
-      ${t.processed ? `<span class="s done">✓ traitée${t.fbx ? ' · FBX' : ''}</span>` : ''}
-      <button ${S.processing && S.processing.running || t.videos.length < 2 ? 'disabled' : ''} onclick="send({a:'process', take:'${esc(t.name)}'})">${t.processed ? 'Retraiter' : 'Traiter'}</button>
-      <button onclick="send({a:'open', take:'${esc(t.name)}'})">📁</button>
-    </div>`).join('') : '<p class="hint">Aucune prise pour l\'instant.</p>';
-}
-
-function saveSide() {
-  const v = parseFloat(String($('side').value).replace(',', '.'));
-  if (!(v >= 0.5 && v <= 8)) { toast('Indiquez le côté du carré en mètres (ex. 1.50)', 'error'); return; }
-  send({ a: 'square', side: v });
+  const n = cams.length;
+  const checked = cams.filter(c => c.check && c.check.ok && c.check.seen >= 4);
+  const pending = cams.some(c => c.check && c.check.pending);
+  const locked = cams.filter(c => c.locked);
+  const worst = n ? Math.max(...cams.map(c => c.sync_ms ?? 999)) : null;
+  const h = S.actor_height_cm;
+  let html = '';
+  html += chkRow(n >= 2 ? 'ok' : n ? 'warn' : 'err', n >= 2 ? `${n} caméras connectées` : n ? '1 caméra connectée' : 'Aucune caméra',
+                 n >= 2 ? cams.map(c => esc(c.name)).join(', ') : 'Il en faut au moins deux : scannez le QR code avec chaque téléphone.');
+  html += chkRow(!n ? 'err' : checked.length === n ? 'ok' : 'warn', 'Boules au sol vues par chaque caméra',
+                 !n ? '' : pending ? 'Vérification en cours…' : checked.length === n ? 'Calibration possible' : `${checked.length} caméra${checked.length > 1 ? 's' : ''} sur ${n} vérifiée${checked.length > 1 ? 's' : ''}`,
+                 n ? `<button class="btn small" onclick="send({a:'check'})" ${pending ? 'disabled' : ''}>Vérifier</button>` : '');
+  html += chkRow(!n ? 'err' : locked.length === n ? 'ok' : 'warn', 'Exposition et mise au point bloquées',
+                 locked.length === n && n ? 'Image stable pendant la prise' : 'À faire une fois l\'acteur en place',
+                 n ? (locked.length === n ? `<button class="btn small" onclick="send({a:'unlock'})">Auto</button>` : `<button class="btn small" onclick="send({a:'lock',fast:$('fast').checked})">Bloquer</button>`) : '');
+  html += chkRow(h ? 'ok' : 'warn', h ? `Acteur de ${fr(h, 1)} cm` : 'Taille de l\'acteur', h ? 'Le squelette exporté aura cette taille' : 'Indiquez-la en cm (en haut) : sinon la taille vient de l\'écart entre les boules');
+  html += chkRow(!n || worst === 999 ? 'warn' : worst < 30 ? 'ok' : worst < 100 ? 'warn' : 'err', 'Horloges des téléphones',
+                 n && worst !== 999 ? `±${fr(worst)} ms (la synchro fine se fait au bip)` : 'Mesure en cours…');
+  $('checklist').innerHTML = html;
 }
 function record() { takeTyped = false; send({ a: 'record', take: $('takeName').value.trim() }); actx = actx || new AudioContext(); actx.resume(); }
-function rename(id, old) { const n = prompt('Nom de la caméra (sert de nom de fichier) :', old); if (n) send({ a: 'rename', cam: id, name: n }); }
-function identifyAll() { (S?.cams || []).forEach(c => send({ a: 'identify', cam: c.id })); }
-function showCheck(id) { $('modalImg').src = `/check/${id}?t=${Date.now()}`; $('modal').style.display = 'flex'; }
-$('takeName').addEventListener('input', () => takeTyped = true);
+function renameCam(id, old) { const n = prompt('Nom de la caméra (sert de nom de fichier) :', old); if (n) send({ a: 'rename', cam: id, name: n }); }
+function showCheck(id) { $('modalImg').src = `/check/${id}?t=${Date.now()}`; $('modal').classList.add('on'); }
+window.renameCam = renameCam; window.showCheck = showCheck; window.record = record;
+
+// ---------------------------------------------------------------- prises
+const STEPS = ['Normalisation des vidéos', 'Synchronisation par le son', 'Calibration par les boules', 'Détection du corps et des mains', 'Triangulation 3D', 'Affinage du mouvement et export'];
+function takeStatus(t) {
+  const P = S.processing;
+  if (P && P.running && P.take === t.name) return `<span class="warn-t">${esc(P.label)}…</span>`;
+  if ((S.queue || []).some(j => j.take === t.name)) return '<span class="hint">en attente</span>';
+  if (t.processed) return `<span class="ok-t">${t.fbx ? 'FBX prêt' : 'traitée'}</span>`;
+  if (t.videos.length < 2) return '<span class="hint">incomplète</span>';
+  return '<span class="hint">à traiter</span>';
+}
+function renderTakesList() {
+  const L = S.takes;
+  if (!selTake || !L.some(t => t.name === selTake)) selTake = L.length ? L[0].name : null;
+  $('takesList').innerHTML = L.length ? L.map(t => `<div class="tk" role="button" tabindex="0" aria-selected="${t.name === selTake}" onclick="selectTake('${esc(t.name)}')" onkeydown="if(event.key==='Enter')selectTake('${esc(t.name)}')">
+      <span class="n">${esc(t.name)}</span><span class="st">${takeStatus(t)}</span>
+      <span class="s">${t.created ? esc(t.created.slice(0, 16).replace(' ', ', ')) : ''}${t.duration ? (t.created ? ', ' : '') + fr(t.duration) + ' s' : ''}</span>
+      <span class="s" style="justify-self:end">${t.videos.length} vidéo${t.videos.length > 1 ? 's' : ''}</span>
+    </div>`).join('') : '<div class="empty-page">Aucune prise pour l\'instant.<br>Filmez-en une depuis l\'onglet Tournage.</div>';
+}
+function selectTake(n) { selTake = n; renderTakesList(); renderTakeDetail(true); }
+window.selectTake = selectTake;
+
+let detailKey = '', viewerSel = null;
+function renderTakeDetail(force) {
+  const t = S.takes.find(x => x.name === selTake);
+  const P = S.processing;
+  const running = P && P.running && P.take === (t && t.name);
+  const queued = t && (S.queue || []).some(j => j.take === t.name);
+  const key = JSON.stringify([t, running && [P.step, P.label], queued, S.characters.map(c => c.id), S.character, S.blender]);
+  if (!force && key === detailKey) return;
+  detailKey = key;
+  const box = $('takeDetail');
+  const oldBox = $('viewerBox');
+  if (oldBox) oldBox.remove();
+  if (!t) { box.innerHTML = '<div class="empty-page">Les prises filmées apparaissent ici.</div>'; return; }
+  const chars = S.characters;
+  const animated = chars.filter(c => t.characters.includes(c.id));
+  const sources = [{ id: '', label: 'Squelette' }].concat(animated.map(c => ({ id: c.id, label: c.name })));
+  if (viewerSel == null || !sources.some(s => s.id === viewerSel.id && viewerSel.take === t.name)) viewerSel = { take: t.name, id: animated.length && animated.some(c => c.id === S.character) ? S.character : '' };
+  const busy = running || queued;
+  const stepsHtml = running && P.kind === 'traiter' ? `<div class="steps">${STEPS.map((s, i) => `<div class="step ${i + 1 < P.step ? 'done' : i + 1 === P.step ? 'cur' : ''}"><span class="n">${i + 1}</span><span>${s}</span></div>`).join('')}</div>` : '';
+  const hVal = t.height_cm ?? '';
+  box.innerHTML = `
+    <div>
+      <h1>${esc(t.name)}</h1>
+      <div class="sub">${t.created ? esc(t.created) : ''}${t.duration ? ' — ' + fr(t.duration) + ' s' : ''} — ${t.videos.map(esc).join(', ') || 'aucune vidéo'}</div>
+    </div>
+    <div class="grid2">
+      <div class="panel">
+        <div class="viewer" id="viewerBox" data-take="${esc(t.name)}" data-src="${esc(viewerSel.id)}"><div class="empty" id="viewerEmpty">${t.preview ? 'Chargement de l\'aperçu…' : 'L\'aperçu 3D apparaît une fois la prise traitée.'}</div></div>
+        <div class="player" id="playerBar" style="${t.preview ? '' : 'display:none'}">
+          <button class="btn small" id="vPlay">Pause</button>
+          <input type="range" id="vScrub" min="0" max="1000" value="0" aria-label="Position dans la prise">
+          <span class="time" id="vTime"></span>
+        </div>
+        ${t.preview ? `<div class="row" style="align-items:center"><span class="hint">Afficher</span><span class="seg">${sources.map(s => `<button aria-pressed="${s.id === viewerSel.id}" onclick="pickViewer('${esc(t.name)}','${esc(s.id)}')">${esc(s.label)}</button>`).join('')}</span></div>` : ''}
+      </div>
+      <div style="display:grid;gap:18px">
+        <div class="panel">
+          <div class="side-h">Traitement</div>
+          ${running ? (P.kind === 'traiter' ? `<div class="hint">En cours${P.step ? ` : étape ${P.step} sur 6` : '…'} — vous pouvez filmer pendant ce temps.</div>${stepsHtml}` : `<div>${esc(P.label)}…</div>`) : queued ? '<div class="hint">En attente d\'un autre traitement…</div>' : t.processed ? `<div class="ok-t">Prise traitée${t.measured_cm ? `, acteur de ${fr(t.measured_cm, 0)} cm` : ''}</div>` : `<div class="hint">${t.videos.length < 2 ? 'Il faut les vidéos d\'au moins deux caméras.' : 'Compte 5 à 8 minutes par prise. Vous pouvez filmer pendant ce temps.'}</div>`}
+          <div class="row">
+            <button class="btn ${t.processed ? '' : 'primary'}" ${busy || t.videos.length < 2 ? 'disabled' : ''} onclick="send({a:'process',take:'${esc(t.name)}'})">${t.processed ? 'Retraiter' : 'Traiter la prise'}</button>
+            ${queued ? `<button class="btn" onclick="send({a:'cancel_queue',take:'${esc(t.name)}'})">Retirer de la file</button>` : ''}
+          </div>
+        </div>
+        <div class="panel">
+          <div class="side-h">Taille de l'acteur</div>
+          <div class="row">
+            <label class="field" style="width:140px"><span>Taille réelle</span><span class="unit" data-unit="cm"><input class="input" id="takeH" type="number" min="50" max="260" value="${esc(hVal)}" placeholder="${esc(S.actor_height_cm ?? '178')}"></span></label>
+            <button class="btn" ${busy ? 'disabled' : ''} onclick="applyTakeHeight('${esc(t.name)}')">${t.processed ? 'Appliquer' : 'Enregistrer'}</button>
+          </div>
+          <p class="hint">${t.processed ? 'Remet le squelette et les FBX à cette taille en quelques secondes, sans refaire le traitement.' : 'Utilisée au traitement de cette prise.'}</p>
+        </div>
+        <div class="panel">
+          <div class="side-h">Fichiers</div>
+          <div class="files">
+            ${t.fbx ? `<div class="file"><span class="ext">FBX</span><span>${esc(t.name)}.fbx — squelette Mixamo animé</span></div>` : '<div class="hint">Le FBX est créé à la fin du traitement.</div>'}
+            ${animated.map(c => `<div class="file"><span class="ext">FBX</span><span>${esc(t.name)}_${esc(c.id)}.fbx — ${esc(c.name)} animé</span></div>`).join('')}
+          </div>
+          <div class="row">
+            <button class="btn" onclick="send({a:'open',take:'${esc(t.name)}'})">Ouvrir le dossier</button>
+          </div>
+          ${chars.length ? `<div class="row" style="margin-top:4px">
+              <label class="field" style="flex:1"><span>Animer un personnage</span>
+                <select class="input" id="animChar">${chars.map(c => `<option value="${esc(c.id)}" ${c.id === S.character ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+              <button class="btn" ${!t.fbx || busy ? 'disabled' : ''} onclick="send({a:'animate',take:'${esc(t.name)}',id:$('animChar').value})">Animer</button>
+            </div>` : `<p class="hint">Ajoutez votre personnage riggé dans l'onglet <button class="link" onclick="showPage('pChars')">Personnages</button> : il sera animé avec vos prises.</p>`}
+        </div>
+      </div>
+    </div>
+    <details class="log" ${running ? 'open' : ''}><summary>Journal du traitement</summary><div class="logbox" id="log"></div></details>`;
+  const l = $('log'); l.textContent = logText || 'Les messages du traitement s\'affichent ici.'; l.scrollTop = l.scrollHeight;
+  // l'aperçu 3D déjà affiché pour cette prise est gardé tel quel (pas de rechargement)
+  const nb = $('viewerBox');
+  if (oldBox && nb && oldBox.dataset.take === nb.dataset.take && oldBox.dataset.src === nb.dataset.src && oldBox.querySelector('canvas')) nb.replaceWith(oldBox);
+  window.mcViewer.show(t.preview ? viewerSel : null);
+}
+function applyTakeHeight(take) {
+  const v = +$('takeH').value;
+  if (!(v >= 50 && v <= 260)) { toast('Indiquez la taille en cm, entre 50 et 260', 'error'); return; }
+  send({ a: 'take_height', take, cm: v });
+}
+function pickViewer(take, id) { viewerSel = { take, id }; renderTakeDetail(true); }
+document.addEventListener('click', (e) => {
+  if (e.target.id === 'vPlay') e.target.textContent = window.mcViewer.toggle() ? 'Pause' : 'Lecture';
+});
+document.addEventListener('input', (e) => { if (e.target.id === 'vScrub') window.mcViewer.seek(e.target.value / 1000); });
+window.applyTakeHeight = applyTakeHeight; window.pickViewer = pickViewer; window.showPage = showPage;
+
+// ---------------------------------------------------------------- personnages
+let charsKey = '';
+function renderChars() {
+  $('noBlender').style.display = S.blender ? 'none' : '';
+  const b = S.char_busy;
+  $('charBusy').style.display = b ? '' : 'none';
+  if (b) $('charBusy').textContent = `Lecture de « ${b.name} » avec Blender…`;
+  const key = JSON.stringify([S.characters, S.character]);
+  if (key === charsKey) return;
+  charsKey = key;
+  $('charGrid').innerHTML = S.characters.map(c => {
+    const i = c.info || {};
+    return `<article class="char ${c.id === S.character ? 'def' : ''}">
+      <div class="thumb" data-thumb="${esc(c.id)}">Aperçu…</div>
+      <div class="body">
+        <div class="nm">${esc(c.name)}</div>
+        <div class="meta">Squelette ${esc(i.kind || '?')}, ${i.mapped ?? '?'} os reconnus${i.fingers ? ', doigts' : ', sans doigts'}</div>
+        <div class="meta">${i.meshes ?? 0} maillage${i.meshes > 1 ? 's' : ''}${i.triangles ? `, ${i.triangles >= 10000 ? fr(i.triangles / 1000, 0) + ' k' : fr(i.triangles, 0)} triangles` : ''}${i.height ? `, ${fr(i.height * 100, 0)} cm de haut` : ''}</div>
+        <div class="acts">
+          ${c.id === S.character ? '<span class="ok-t" style="font-size:13px">Animé après chaque traitement</span>' : `<button class="btn small" onclick="send({a:'character_default',id:'${esc(c.id)}'})">Animer après chaque traitement</button>`}
+          <span style="flex:1"></span>
+          <button class="btn small danger" onclick="if(confirm('Supprimer ${esc(c.name)} ?')) send({a:'character_delete',id:'${esc(c.id)}'})">Supprimer</button>
+        </div>
+      </div>
+    </article>`;
+  }).join('') + (S.characters.length ? '' : '<p class="hint">Aucun personnage pour l\'instant.</p>');
+  if (S.character && S.characters.length) $('charGrid').insertAdjacentHTML('beforeend',
+    `<p class="hint" style="grid-column:1/-1"><button class="link" onclick="send({a:'character_default',id:''})">Ne plus animer de personnage après les traitements</button></p>`);
+  window.dispatchEvent(new CustomEvent('mc-thumbs'));
+}
+async function uploadChar(file) {
+  if (!file) return;
+  const name = $('charName').value.trim() || file.name.replace(/\.[^.]+$/, '');
+  toast(`Envoi de ${file.name}…`);
+  try {
+    const r = await fetch(`/character?name=${encodeURIComponent(name)}&filename=${encodeURIComponent(file.name)}`, { method: 'POST', body: file });
+    const j = await r.json();
+    if (j.ok) { $('charName').value = ''; }
+  } catch (e) { toast('Envoi impossible : ' + e, 'error'); }
+}
+$('charFile').onchange = (e) => { uploadChar(e.target.files[0]); e.target.value = ''; };
+const drop = $('drop');
+['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', (e) => uploadChar(e.dataTransfer.files[0]));
+
+// ---------------------------------------------------------------- rendu global
+function render() {
+  $('nCams').textContent = S.cams.length ? S.cams.length : '';
+  $('nTakes').textContent = S.takes.length ? S.takes.length : '';
+  $('nChars').textContent = S.characters.length ? S.characters.length : '';
+  const n = S.net || {};
+  const st = S.cams.length >= 2 ? 'ok' : S.cams.length ? 'warn' : 'err';
+  $('net').innerHTML = `<span class="dot ${(n.adapters || []).length ? (n.public && n.firewall_rule === false ? 'warn' : 'ok') : 'err'}"></span>${n.ssid ? `Wi-Fi <b>${esc(n.ssid)}</b>` : (n.adapters || []).length ? 'Réseau filaire' : 'Pas de réseau'}<span class="dot ${st}" style="margin-left:10px"></span>${S.cams.length} caméra${S.cams.length > 1 ? 's' : ''}`;
+  $('netDetail').innerHTML = (n.adapters || []).map(a => `${esc(a.name)} : ${esc(a.ip)}`).join('<br>') + (n.public ? '<br><span class="warn-t">Réseau classé public par Windows</span>' : '') + (n.firewall_rule ? '<br><span class="ok-t">Règle de pare-feu MocapCam active</span>' : '');
+  $('paths').textContent = `Prises : ${S.captures}`;
+  if (document.activeElement !== $('p60')) $('p60').checked = !!S.prefer60;
+  if (document.activeElement !== $('pfps')) $('pfps').value = String(S.preview_fps);
+  renderCams();
+  renderShoot();
+  renderTakesList();
+  renderTakeDetail();
+  renderChars();
+}
 
 setInterval(() => {
   if (!S || !S.take || !S.take.at_pc || !['starting', 'recording'].includes(S.take.state)) {
@@ -292,7 +714,180 @@ setInterval(() => {
   const t = Math.max(0, (Date.now() + serverDelta - S.take.at_pc) / 1000);
   $('timer').textContent = `${String(Math.floor(t / 60)).padStart(2, '0')}:${(t % 60).toFixed(1).padStart(4, '0')}`;
 }, 100);
-connect();
 </script>
+
+<!-- ============================================================ aperçu 3D (three.js, fourni avec MocapCam) -->
+<script type="module">
+import { THREE, GLTFLoader, OrbitControls } from '/vendor/three-bundle.min.js';
+
+// os à dessiner (indices dans la liste réduite : 23 points du corps puis 2 × 21 points des mains)
+const BODY = [[0,1],[0,2],[1,3],[2,4],[5,6],[5,7],[7,9],[6,8],[8,10],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16],[15,17],[15,18],[15,19],[16,20],[16,21],[16,22]];
+const HAND = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
+const PAIRS = BODY.concat(HAND.map(([a, b]) => [23 + a, 23 + b]), HAND.map(([a, b]) => [44 + a, 44 + b]));
+
+const V = { renderer: null, scene: null, camera: null, controls: null, mixer: null, clip: null, sk: null,
+            playing: true, t: 0, dur: 0, key: '', box: null, raf: 0, last: 0 };
+
+function setup(box) {
+  if (V.renderer && V.box === box) return;
+  teardown();
+  V.box = box;
+  V.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  V.renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+  V.renderer.outputColorSpace = THREE.SRGBColorSpace;
+  box.appendChild(V.renderer.domElement);
+  V.scene = new THREE.Scene();
+  V.camera = new THREE.PerspectiveCamera(35, 1.6, 0.05, 200);
+  V.controls = new OrbitControls(V.camera, V.renderer.domElement);
+  V.controls.enableDamping = true;
+  V.scene.add(new THREE.HemisphereLight(0xdde6ff, 0x30333a, 2.2));
+  const sun = new THREE.DirectionalLight(0xffffff, 2.0); sun.position.set(2, 4, 3); V.scene.add(sun);
+  const grid = new THREE.GridHelper(10, 20, 0x46506a, 0x2c3342); V.scene.add(grid);
+  new ResizeObserver(resize).observe(box);
+  resize();
+  loop();
+}
+function teardown() {
+  cancelAnimationFrame(V.raf);
+  if (V.renderer) { V.renderer.dispose(); V.renderer.domElement.remove(); }
+  Object.assign(V, { renderer: null, scene: null, mixer: null, clip: null, sk: null, key: '', box: null });
+}
+function resize() {
+  if (!V.renderer || !V.box) return;
+  const w = V.box.clientWidth, h = V.box.clientHeight;
+  if (!w || !h) return;
+  V.renderer.setSize(w, h, false); V.camera.aspect = w / h; V.camera.updateProjectionMatrix();
+}
+function frame(center, size) {
+  const d = size * 1.9;
+  V.camera.position.set(center.x + d * 0.55, center.y + size * 0.25, center.z + d);
+  V.controls.target.copy(center); V.controls.update();
+}
+function clearContent() {
+  if (!V.scene) return;
+  for (const o of [...V.scene.children]) if (o.userData.content) V.scene.remove(o);
+  V.mixer = null; V.clip = null; V.sk = null;
+}
+function loop(now = 0) {
+  V.raf = requestAnimationFrame(loop);
+  if (!V.renderer || !V.box.isConnected || V.box.offsetParent === null) return;
+  const dt = V.last ? Math.min(0.1, (now - V.last) / 1000) : 0; V.last = now;
+  if (V.playing && V.dur) { V.t = (V.t + dt) % V.dur; }
+  applyTime();
+  V.controls.update();
+  V.renderer.render(V.scene, V.camera);
+  const sc = document.getElementById('vScrub'), tm = document.getElementById('vTime');
+  if (sc && V.dur && document.activeElement !== sc) sc.value = String(Math.round(1000 * V.t / V.dur));
+  if (tm && V.dur) tm.textContent = `${V.t.toFixed(1)} / ${V.dur.toFixed(1)} s`;
+}
+function applyTime() {
+  if (V.mixer) V.mixer.setTime(V.t);
+  if (V.sk) {
+    const S = V.sk, f = Math.min(S.frames.length - 1, Math.floor(V.t * S.fps));
+    const fr = S.frames[f], pos = S.line.geometry.attributes.position.array;
+    let k = 0;
+    for (const [a, b] of PAIRS) {
+      const p = fr[a], q = fr[b];
+      for (const v of [p, q]) {
+        if (p && q) { pos[k] = v[0]; pos[k + 1] = v[2]; pos[k + 2] = -v[1]; } else { pos[k] = pos[k + 1] = pos[k + 2] = 0; }
+        k += 3;
+      }
+    }
+    S.line.geometry.attributes.position.needsUpdate = true;
+    const m = new THREE.Matrix4();
+    for (let i = 0; i < 23; i++) {
+      const p = fr[i];
+      m.makeScale(p ? 1 : 0, p ? 1 : 0, p ? 1 : 0);
+      if (p) m.setPosition(p[0], p[2], -p[1]);
+      S.dots.setMatrixAt(i, m);
+    }
+    S.dots.instanceMatrix.needsUpdate = true;
+  }
+}
+async function showSkeleton(take) {
+  const r = await fetch(`/take/${encodeURIComponent(take)}/squelette.json`);
+  if (!r.ok) throw new Error('aperçu indisponible');
+  const d = await r.json();
+  clearContent();
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(PAIRS.length * 6), 3));
+  const line = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xe9ecf2 }));
+  line.frustumCulled = false; line.userData.content = true;
+  const dots = new THREE.InstancedMesh(new THREE.SphereGeometry(0.022, 12, 8), new THREE.MeshStandardMaterial({ color: 0x4f80f4, roughness: .5 }), 23);
+  dots.frustumCulled = false; dots.userData.content = true;
+  V.scene.add(line, dots);
+  V.sk = { frames: d.frames, fps: d.fps, line, dots };
+  V.dur = d.frames.length / d.fps; V.t = 0;
+  // cadrage sur la zone parcourue
+  const pts = [];
+  for (let i = 0; i < d.frames.length; i += Math.max(1, Math.floor(d.frames.length / 60))) for (const p of d.frames[i]) if (p) pts.push(new THREE.Vector3(p[0], p[2], -p[1]));
+  const bb = new THREE.Box3().setFromPoints(pts);
+  frame(bb.getCenter(new THREE.Vector3()), Math.max(1.2, bb.getSize(new THREE.Vector3()).length() * 0.6));
+}
+async function showGlb(url, animated) {
+  const g = await new GLTFLoader().loadAsync(url);
+  clearContent();
+  g.scene.userData.content = true;
+  g.scene.traverse(o => { if (o.isMesh) { o.frustumCulled = false; } });
+  V.scene.add(g.scene);
+  if (animated && g.animations.length) {
+    V.mixer = new THREE.AnimationMixer(g.scene);
+    V.clip = g.animations[0];
+    V.mixer.clipAction(V.clip).play();
+    V.dur = V.clip.duration; V.t = 0;
+  } else { V.dur = 0; }
+  applyTime();
+  const bb = new THREE.Box3().setFromObject(g.scene);
+  frame(bb.getCenter(new THREE.Vector3()), Math.max(1.2, bb.getSize(new THREE.Vector3()).length() * 0.7));
+}
+
+window.mcViewer = {
+  async show(sel) {
+    const box = document.getElementById('viewerBox');
+    if (!sel || !box) return;
+    const key = `${sel.take}|${sel.id}`;
+    const fresh = V.box !== box;
+    setup(box);
+    if (!fresh && key === V.key) return;
+    V.key = key;
+    const empty = document.getElementById('viewerEmpty');
+    try {
+      if (sel.id) await showGlb(`/take/${encodeURIComponent(sel.take)}/apercu.glb?c=${encodeURIComponent(sel.id)}&t=${Date.now()}`, true);
+      else await showSkeleton(sel.take);
+      if (empty) empty.remove();
+    } catch (e) { if (empty) empty.textContent = 'Aperçu indisponible : ' + e.message; }
+  },
+  toggle() { V.playing = !V.playing; return V.playing; },
+  seek(f) { V.t = V.dur * f; },
+};
+if (window.mcRerender) window.mcRerender();
+
+// vignettes des personnages : rendu unique hors écran
+const thumbs = {};
+async function renderThumb(el) {
+  const id = el.dataset.thumb;
+  if (thumbs[id]) { el.innerHTML = `<img src="${thumbs[id]}" alt="">`; return; }
+  try {
+    const r = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    r.setSize(360, 360); r.outputColorSpace = THREE.SRGBColorSpace;
+    const sc = new THREE.Scene();
+    sc.add(new THREE.HemisphereLight(0xdde6ff, 0x30333a, 2.4));
+    const sun = new THREE.DirectionalLight(0xffffff, 2.2); sun.position.set(2, 4, 3); sc.add(sun);
+    const g = await new GLTFLoader().loadAsync(`/character/${encodeURIComponent(id)}/apercu.glb?t=${Date.now()}`);
+    sc.add(g.scene);
+    const bb = new THREE.Box3().setFromObject(g.scene), c = bb.getCenter(new THREE.Vector3()), s = bb.getSize(new THREE.Vector3());
+    const cam = new THREE.PerspectiveCamera(30, 1, 0.01, 1000);
+    const d = Math.max(s.y, s.x) * 2.1;
+    cam.position.set(c.x + d * 0.35, c.y + s.y * 0.1, c.z + d); cam.lookAt(c);
+    r.render(sc, cam);
+    thumbs[id] = r.domElement.toDataURL('image/png');
+    r.dispose();
+    el.innerHTML = `<img src="${thumbs[id]}" alt="">`;
+  } catch (e) { el.textContent = 'Aperçu indisponible'; }
+}
+window.addEventListener('mc-thumbs', () => document.querySelectorAll('[data-thumb]').forEach(renderThumb));
+document.querySelectorAll('[data-thumb]').forEach(renderThumb);
+</script>
+<script>connect();</script>
 </body>
 </html>

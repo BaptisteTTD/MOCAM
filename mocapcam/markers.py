@@ -79,10 +79,14 @@ def detect_candidates(image_bgr, markers, min_area=12):
 LENS_F_SCALE = {"wide": 0.75, "ultra": 0.36}   # focale / largeur d'image (×1 ≈ 26 mm, ×0,5 ≈ 13 mm)
 
 
-def default_K(width, height, lens="wide"):
+def default_K(width, height, lens="wide", fov=None):
     """Focale de départ selon l'objectif du téléphone (×1 ≈ 26 mm équivalent,
-    ×0,5 ≈ 13 mm), centre optique au milieu de l'image."""
-    f = LENS_F_SCALE.get(lens or "wide", 0.75) * max(width, height)
+    ×0,5 ≈ 13 mm), centre optique au milieu de l'image. fov : champ de vision choisi dans
+    l'app, en équivalent zoom (0,5 ; 0,7 ; 1 ; 1,5 ; 2…), prioritaire sur l'objectif."""
+    if fov:
+        f = LENS_F_SCALE["wide"] * float(fov) * max(width, height)
+    else:
+        f = LENS_F_SCALE.get(lens or "wide", 0.75) * max(width, height)
     return np.array([[f, 0, width / 2.0], [0, f, height / 2.0], [0, 0, 1.0]])
 
 
@@ -238,14 +242,14 @@ def fit_score(err, n_missing, focal_free=True):
 
 
 def solve_camera_pose(image_bgr, markers, K=None, dist=None, min_markers=4, max_err_px=8.0,
-                      estimate_focal=False, lens="wide", frames=None, cands=None):
+                      estimate_focal=False, lens="wide", frames=None, cands=None, fov=None):
     """Retourne un dict : R, t (monde -> caméra), K, centre, erreurs, détections.
     Sans K (pas de calibration optique), la focale est estimée avec les boules, autour
     de la focale nominale de l'objectif ; elle reste à cette valeur quand les boules
     vues sont presque alignées (3 alignées + 1)."""
     H, W = image_bgr.shape[:2]
     if K is None:
-        K, dist, estimate_focal = default_K(W, H, lens), np.zeros(5), True
+        K, dist, estimate_focal = default_K(W, H, lens, fov), np.zeros(5), True
     dist = np.zeros(5) if dist is None else dist
     if cands is None:
         cands = find_candidates(image_bgr, markers, frames)

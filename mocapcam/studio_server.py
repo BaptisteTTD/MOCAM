@@ -2,17 +2,21 @@
 
   python -m mocapcam studio            (ou double-clic sur « MocapCam Studio.bat »)
 
-- les téléphones (app MocapCam) se connectent en scannant un QR code ;
-- aperçu en direct, état (batterie, i/s, synchro d'horloge) ;
+- les téléphones (app MocapCam) se connectent en scannant un QR code (Wi-Fi ou partage de
+  connexion d'un téléphone) ;
+- aperçu en direct, état (batterie, i/s, synchro d'horloge), champ de vision ;
 - vérification des boules au sol en direct ;
 - enregistrement lancé en même temps sur tous les téléphones + signal sonore de synchro ;
-- rapatriement automatique des vidéos, puis traitement de la prise.
+- rapatriement automatique des vidéos, traitement des prises (file d'attente) ;
+- taille de l'acteur en cm ; personnages riggés animés avec les prises (aperçu 3D).
 """
 import asyncio
+import hashlib
 import json
 import os
 import re
 import secrets
+import shutil
 import socket
 import subprocess
 import sys
@@ -20,12 +24,13 @@ import tempfile
 import time
 import wave
 import webbrowser
+import zipfile
 from dataclasses import dataclass, field
 
 import numpy as np
 from aiohttp import WSMsgType, web
 
-from . import markers as mk, pipeline, sync
+from . import fbx, markers as mk, pipeline, sync
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "studio_ui")
@@ -39,8 +44,86 @@ def now_ms():
 
 
 def safe_name(s, default="x"):
-    s = re.sub(r"[^A-Za-z0-9_\-]+", "_", str(s or "")).strip("_")
+    import unicodedata
+    s = unicodedata.normalize("NFKD", str(s or "")).encode("ascii", "ignore").decode()
+    s = re.sub(r"[^A-Za-z0-9_\-]+", "_", s).strip("_")
     return s[:40] or default
+
+
+# cartes réseau virtuelles : jamais joignables par les téléphones
+VIRTUAL_ADAPTERS = ("virtualbox", "vmware", "vethernet", "hyper-v", "wsl", "loopback", "bluetooth", "vpn",
+                    "tailscale", "zerotier", "hamachi", "docker", "npcap", "teredo", "isatap", "tap-", "wintun",
+                    "nordlynx", "radmin")
+WIFI_WORDS = ("wi-fi", "wifi", "wlan", "wireless", "sans fil")
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def _run(cmd, timeout=6):
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=timeout, creationflags=CREATE_NO_WINDOW)
+    except (OSError, subprocess.TimeoutExpired):
+        return None, ""
+    enc = "oem" if sys.platform.startswith("win") else "utf-8"
+    try:
+        out = r.stdout.decode(enc, "replace")
+    except LookupError:
+        out = r.stdout.decode("utf-8", "replace")
+    return r.returncode, out
+
+
+def windows_adapters():
+    """[(carte réseau, adresse IPv4)] d'après ipconfig (Windows)."""
+    rc, out = _run(["ipconfig"])
+    res, adapter = [], ""
+    for line in out.splitlines():
+        if line and not line[0].isspace() and line.rstrip().endswith(":"):
+            adapter = line.strip().rstrip(":").strip()
+        elif "IPv4" in line:
+            m = re.search(r"(\d+\.\d+\.\d+\.\d+)", line)
+            if m:
+                res.append((adapter, m.group(1)))
+    return res
+
+
+def network_info(port=8765):
+    """Adresses du PC (Wi-Fi d'abord, cartes virtuelles exclues), nom du Wi-Fi, profil réseau
+    Windows (public = pare-feu plus strict) et règle de pare-feu MocapCam."""
+    info = dict(hosts=[], ssid=None, public=False, firewall_rule=None, adapters=[])
+    if sys.platform.startswith("win"):
+        ad = [(a, ip) for a, ip in windows_adapters() if not ip.startswith(("127.", "169.254."))]
+        real = [(a, ip) for a, ip in ad if not any(v in a.lower() for v in VIRTUAL_ADAPTERS)]
+        real.sort(key=lambda x: (0 if any(w in x[0].lower() for w in WIFI_WORDS) else 1))
+        info["adapters"] = [dict(name=a, ip=ip) for a, ip in real]
+        info["hosts"] = [ip for _, ip in real] or [ip for _, ip in ad]
+        rc, out = _run(["netsh", "wlan", "show", "interfaces"])
+        m = re.search(r"^\s*SSID\s*:\s*(.+?)\s*$", out, re.M)
+        if m:
+            info["ssid"] = m.group(1)
+        rc, out = _run(["powershell", "-NoProfile", "-Command",
+                        "Get-NetConnectionProfile | Select-Object InterfaceAlias,NetworkCategory | ConvertTo-Json"])
+        try:
+            prof = json.loads(out) if out.strip() else []
+            prof = prof if isinstance(prof, list) else [prof]
+            info["public"] = any(str(p.get("NetworkCategory")) in ("0", "Public") for p in prof)
+        except ValueError:
+            pass
+        rc, _ = _run(["netsh", "advfirewall", "firewall", "show", "rule", "name=MocapCam Studio"])
+        info["firewall_rule"] = rc == 0
+    if not info["hosts"]:
+        info["hosts"] = lan_addresses()
+    if not info["adapters"]:
+        info["adapters"] = [dict(name="réseau", ip=ip) for ip in info["hosts"] if not ip.startswith("127.")]
+    return info
+
+
+def allow_firewall(port):
+    """Ouvre le port de MocapCam Studio sur tous les réseaux (public compris : partage de
+    connexion d'un téléphone). Windows demande l'accord de l'administrateur."""
+    args = (f'advfirewall firewall add rule name="MocapCam Studio" dir=in action=allow protocol=TCP '
+            f'localport={port} profile=any')
+    ps = f"Start-Process netsh -ArgumentList '{args}' -Verb RunAs -WindowStyle Hidden -Wait"
+    rc, out = _run(["powershell", "-NoProfile", "-Command", ps], timeout=120)
+    return rc == 0
 
 
 def lan_addresses():
@@ -79,9 +162,14 @@ class Cam:
     preview_ts: float = 0.0
     check: dict = None
     check_jpg: bytes = b""
+    check_seq: int = 0
     take: dict = field(default_factory=dict)        # état pour la prise en cours
     locked: bool = False
+    app: str = ""
     connected_at: float = field(default_factory=now_ms)
+
+    def recording_flag(self):
+        return bool(self.status.get("recording"))
 
     def public(self):
         st = self.status
@@ -94,6 +182,7 @@ class Cam:
             device_type=st.get("device_type"), resolution=st.get("resolution"),
             res720=st.get("res720"), supports60=st.get("supports60"),
             lens=st.get("lens"), ultra_available=st.get("ultra_available"), zoom=st.get("zoom"),
+            fov=st.get("fov"), fov_options=st.get("fov_options"), app=self.status.get("app") or self.app,
             sync_ms=None if np.isnan(self.rtt) else round(self.rtt / 2, 1),
             preview_ts=self.preview_ts, check=self.check, take=self.take,
         )
@@ -117,25 +206,57 @@ class Studio:
         self._dirty = asyncio.Event()
         self.chirp_wav = None
         self.prefer60 = True        # priorité à 60 i/s (720p si le téléphone l'exige)
-        self.lens_by_name = self._load_lens()   # objectif choisi par caméra (×1 / ×0,5)
+        self.fov_by_name = self._load_fov()     # champ de vision choisi par caméra (×0,5 … ×2)
         self.preview_fps = 3.0
+        self.net = dict(hosts=lan_addresses(), ssid=None, public=False, firewall_rule=None, adapters=[])
+        self.queue = []             # traitements en attente
+        self.char_busy = None       # import de personnage en cours
+        self.has_blender = bool(fbx.find_blender(self.cfg().get("blender") or None))
 
-    def _lens_path(self):
+    def _fov_path(self):
         return os.path.join(self.studio_dir, "objectifs.json")
 
-    def _load_lens(self):
+    def _load_fov(self):
         try:
-            with open(self._lens_path(), encoding="utf-8") as f:
-                return dict(json.load(f))
+            with open(self._fov_path(), encoding="utf-8") as f:
+                d = dict(json.load(f))
         except (OSError, ValueError):
             return {}
+        out = {}
+        for k, v in d.items():      # ancien format : "wide" / "ultra"
+            out[k] = 0.5 if v == "ultra" else 1.0 if v == "wide" else float(v)
+        return out
 
-    def _save_lens(self):
+    def _save_fov(self):
         try:
-            with open(self._lens_path(), "w", encoding="utf-8") as f:
-                json.dump(self.lens_by_name, f, indent=2)
+            with open(self._fov_path(), "w", encoding="utf-8") as f:
+                json.dump(self.fov_by_name, f, indent=2)
         except OSError:
             pass
+
+    def cfg(self):
+        return pipeline.load_studio(self.studio_dir)
+
+    def save_cfg_value(self, key, value):
+        path = os.path.join(self.studio_dir, "studio.json")
+        with open(path, encoding="utf-8") as f:
+            cfg = json.load(f)
+        cfg[key] = value
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2, ensure_ascii=False)
+
+    async def net_loop(self):
+        loop = asyncio.get_running_loop()
+        while True:
+            try:
+                info = await loop.run_in_executor(None, network_info, self.port)
+                hb = bool(fbx.find_blender(self.cfg().get("blender") or None))
+                if info != self.net or hb != self.has_blender:
+                    self.net, self.has_blender = info, hb
+                    self.changed()
+            except Exception:  # noqa: BLE001
+                pass
+            await asyncio.sleep(5)
 
     # ------------------------------------------------------------------ état -> interface
     def takes_list(self):
@@ -155,11 +276,24 @@ class Studio:
                         meta = json.load(f)
                 except (OSError, ValueError):
                     pass
+            height = meta.get("actor_height_cm")
+            rp = os.path.join(p, "mocapcam", "rapport.json")
+            measured = None
+            if os.path.exists(rp):
+                try:
+                    with open(rp, encoding="utf-8") as f:
+                        h = json.load(f).get("actor_height_m")
+                    measured = round(h * 100) if h else None
+                except (OSError, ValueError):
+                    pass
+            chars = [c for c in os.listdir(p) if c.startswith(d + "_") and c.endswith(".fbx")]
             out.append(dict(name=d, videos=vids, processed=os.path.exists(res),
                             result=res if os.path.exists(res) else None,
-                            fbx=os.path.exists(fbx_file),
+                            fbx=os.path.exists(fbx_file), height_cm=height, measured_cm=measured,
+                            characters=[c[len(d) + 1:-4] for c in chars],
+                            preview=os.path.exists(os.path.join(p, "mocapcam", f"{d}.mocap.json")),
                             created=meta.get("created"), duration=meta.get("duration_s")))
-        return out[:50]
+        return out[:60]
 
     def next_take_name(self):
         n = 1
@@ -169,17 +303,27 @@ class Studio:
         return f"prise_{n:03d}"
 
     def state(self):
+        cfg = self.cfg()
+        proc = None
+        if self.proc is not None:
+            proc = {k: self.proc.get(k) for k in ("take", "running", "ok", "kind", "label", "step", "step_label")}
+        q = self.qr_payload()
         return dict(
             type="state", cams=[c.public() for c in self.cams.values()],
             take=self.take, takes=self.takes_list(), next_take=self.next_take_name(),
-            processing=None if self.proc is None else dict(take=self.proc["take"], running=self.proc["running"],
-                                                          ok=self.proc.get("ok")),
-            qr=self.qr_payload(), now=now_ms(), studio=self.studio_dir, captures=self.captures_dir,
-            prefer60=self.prefer60, preview_fps=self.preview_fps, layout=self.layout_info(),
+            processing=proc, queue=[dict(kind=j["kind"], take=j["take"], label=j["label"]) for j in self.queue],
+            qr=q, qr_key=hashlib.sha1(json.dumps(q, sort_keys=True).encode()).hexdigest()[:12],
+            net=dict(ssid=self.net.get("ssid"), public=self.net.get("public"),
+                     firewall_rule=self.net.get("firewall_rule"), adapters=self.net.get("adapters", [])),
+            now=now_ms(), studio=self.studio_dir, captures=self.captures_dir,
+            prefer60=self.prefer60, preview_fps=self.preview_fps,
+            actor_height_cm=cfg.get("actor_height_cm"),
+            characters=pipeline.list_characters(self.studio_dir), character=cfg.get("character") or "",
+            char_busy=self.char_busy, blender=self.has_blender,
         )
 
     def qr_payload(self):
-        return dict(mocapcam=1, hosts=lan_addresses(), port=self.port, token=self.token)
+        return dict(mocapcam=1, hosts=self.net.get("hosts") or lan_addresses(), port=self.port, token=self.token)
 
     def changed(self):
         self._dirty.set()
@@ -258,11 +402,14 @@ class Studio:
                         self._n += 1
                         cid = f"c{self._n}"
                         cam = Cam(id=cid, ws=ws, name=self.unique_name(m.get("name", "camera")),
-                                  platform=m.get("platform", ""), model=m.get("model", ""))
+                                  platform=m.get("platform", ""), model=m.get("model", ""),
+                                  app=str(m.get("app", "")))
                         self.cams[cid] = cam
+                        fov = self.fov_by_name.get(cam.name)
                         await self.send(cam, dict(t="welcome", id=cid, name=cam.name,
                                                   prefer60=self.prefer60, preview=self.preview_fps,
-                                                  lens=self.lens_by_name.get(cam.name, "wide")))
+                                                  lens="ultra" if fov is not None and fov < 0.99 else "wide",
+                                                  **({"fov": fov} if fov is not None else {})))
                         pinger = asyncio.create_task(self.ping_loop(cam))
                         await self.toast(f"Caméra connectée : {cam.name}")
                         self.changed()
@@ -287,7 +434,16 @@ class Studio:
             self.on_pong(cam, m)
             return
         if t == "status":
+            old_fov = cam.status.get("fov")
             cam.status = m
+            fov = m.get("fov")
+            if fov is not None and fov != old_fov and not cam.recording_flag():
+                # champ de vision changé sur le téléphone : retenu, et la vérification est à refaire
+                if self.fov_by_name.get(cam.name) != fov:
+                    self.fov_by_name[cam.name] = fov
+                    self._save_fov()
+                if old_fov is not None:
+                    cam.check = None
             self.changed()
         elif t == "recording":
             cam.take.update(state="recording", called_at_pc=m["called_at"] - cam.offset,
@@ -325,14 +481,42 @@ class Studio:
             cam.preview, cam.preview_ts = jpg, now_ms()
             await self.broadcast(dict(type="preview", cam=cam.id, ts=cam.preview_ts))
         elif kind == 2:
+            seq = cam.check_seq
+            cam.check = dict(pending=True, analysing=True, tries=(cam.check or {}).get("tries", 1))
+            self.changed()
             loop = asyncio.get_running_loop()
             res, dbg = await loop.run_in_executor(None, self.check_markers, cam.name, jpg,
-                                                  cam.status.get("lens") or "wide")
-            cam.check, cam.check_jpg = res, dbg
-            self.changed()
+                                                  cam.status.get("lens") or "wide", cam.status.get("fov"))
+            if seq == cam.check_seq:
+                cam.check, cam.check_jpg = res, dbg
+                self.changed()
 
     # ------------------------------------------------------------------ boules au sol
-    def check_markers(self, name, jpg, lens="wide"):
+    async def request_check(self, cam, tries=3, wait_s=6.0):
+        """Demande l'image pleine résolution et la redemande si elle n'arrive pas (téléphone
+        occupé à envoyer l'aperçu, réseau lent) : un seul clic suffit pour toutes les caméras."""
+        cam.check_seq += 1
+        seq = cam.check_seq
+        for k in range(1, tries + 1):
+            if cam.ws.closed or seq != cam.check_seq:
+                return
+            cam.check = dict(pending=True, tries=k)
+            self.changed()
+            await self.send(cam, dict(t="snapshot"))
+            t0 = time.monotonic()
+            while time.monotonic() - t0 < wait_s:
+                await asyncio.sleep(0.2)
+                if seq != cam.check_seq or cam.ws.closed:
+                    return
+                if cam.check and not cam.check.get("pending"):
+                    return
+                if cam.check and cam.check.get("analysing"):
+                    t0 = time.monotonic()           # image reçue : analyse en cours
+        if seq == cam.check_seq and cam.check and cam.check.get("pending") and not cam.check.get("analysing"):
+            cam.check = dict(ok=False, message="pas de réponse du téléphone : réessayez")
+            self.changed()
+
+    def check_markers(self, name, jpg, lens="wide", fov=None):
         import cv2
         img = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
         if img is None:
@@ -343,7 +527,8 @@ class Studio:
         try:
             cfg = pipeline.load_studio(self.studio_dir)
             mlist = [dict(m, position=m["position_3d"]) for m in cfg["markers"]]
-            view = dict(name=name, bg=img, K=None, dist=None, lens=lens,
+            balls = [dict(name=m["name"], color=m.get("color"), p=list(m["position"][:2])) for m in cfg["markers"]]
+            view = dict(name=name, bg=img, K=None, dist=None, lens=lens, fov=fov,
                         cands=mk.find_candidates(img, mlist))
             # une seule image : on accepte le miroir, mais la recherche de boules échangées
             # (moins sûre avec une seule vue) est faite au traitement, sur toutes les caméras
@@ -353,7 +538,7 @@ class Studio:
                 raise RuntimeError("moins de 4 boules reconnues, ou disposition différente de studio.json")
             vol = mk.volume_box(ml, cfg["volume"]["margin"], cfg["volume"]["height"])
             dbg = mk.draw_debug(img, ml, pose["K"], pose["dist"], pose, vol)
-            res = dict(ok=True, rms=round(pose["rms"], 2), seen=len(pose["used"]), total=len(mlist),
+            res = dict(ok=True, rms=round(pose["rms"], 2), seen=len(pose["used"]), total=len(mlist), balls=balls,
                        missing=pose["missing"], focal=round(float(pose["K"][0, 0]), 0),
                        center=[round(v, 2) for v in pose["center"]], size=[img.shape[1], img.shape[0]],
                        aligned=bool(pose.get("aligned")),
@@ -362,7 +547,13 @@ class Studio:
         except Exception as e:  # noqa: BLE001
             dbg = img.copy()
             cv2.putText(dbg, "Boules non trouvees", (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (0, 0, 255), 3)
-            res = dict(ok=False, message=str(e), size=[img.shape[1], img.shape[0]])
+            try:
+                balls = [dict(name=m["name"], color=m.get("color"), p=list(m["position"][:2]))
+                         for m in pipeline.load_studio(self.studio_dir)["markers"]]
+            except Exception:  # noqa: BLE001
+                balls = []
+            res = dict(ok=False, message=str(e), size=[img.shape[1], img.shape[0]], balls=balls,
+                       missing=[b["name"] for b in balls])
         ok, enc = cv2.imencode(".jpg", dbg, [cv2.IMWRITE_JPEG_QUALITY, 85])
         return res, enc.tobytes() if ok else b""
 
@@ -414,7 +605,8 @@ class Studio:
             return
         os.makedirs(d, exist_ok=True)
         self.take = dict(name=name, state="starting", dir=d, cams=[c.id for c in cams],
-                         created=time.strftime("%Y-%m-%d %H:%M:%S"), chirp_at_pc=None)
+                         created=time.strftime("%Y-%m-%d %H:%M:%S"), chirp_at_pc=None,
+                         actor_height_cm=self.cfg().get("actor_height_cm"))
         for c in cams:
             c.take = dict(name=name, state="armed")
             await self.send(c, dict(t="arm", take=name))
@@ -510,11 +702,12 @@ class Studio:
             clock_offset_ms=c.offset, sync_rtt_ms=c.rtt, platform=c.platform, model=c.model,
             fps=c.status.get("fps"), stabilization=c.status.get("stabilization"),
             resolution=c.status.get("resolution"), exposure=c.status.get("exposure"), locked=c.locked,
-            lens=c.status.get("lens"), zoom=c.status.get("zoom"))
+            lens=c.status.get("lens"), zoom=c.status.get("zoom"), fov=c.status.get("fov"))
 
     def write_take_json(self):
         tk = self.take
         meta = dict(take=tk["name"], created=tk["created"], chirp_at_pc=tk.get("chirp_at_pc"),
+                    actor_height_cm=tk.get("actor_height_cm"),
                     chirps_at_pc=tk.get("chirps_at_pc", []),
                     chirp=sync.CHIRP, at_pc=tk.get("at_pc"),
                     duration_s=round((tk.get("stopped_at_pc", now_ms()) - tk.get("at_pc", now_ms())) / 1000, 1),
@@ -567,32 +760,166 @@ class Studio:
         self.changed()
         return web.Response(text="ok")
 
-    # ------------------------------------------------------------------ traitement
-    async def process(self, take):
-        if self.proc and self.proc["running"]:
-            await self.toast("Un traitement est déjà en cours", "warn")
-            return
-        d = os.path.join(self.captures_dir, safe_name(take))
+    # ------------------------------------------------------------------ traitements (file d'attente)
+    JOB_LABEL = {"traiter": "Traitement", "taille": "Mise à la taille", "animer": "Animation du personnage"}
+
+    async def enqueue(self, kind, take, args=(), label=None):
+        take = safe_name(take)
+        d = os.path.join(self.captures_dir, take)
         if not os.path.isdir(d):
+            await self.toast(f"Prise introuvable : {take}", "error")
             return
-        cmd = [sys.executable, "-u", "-m", "mocapcam", "traiter", self.studio_dir, d]
+        if any(j["kind"] == kind and j["take"] == take and j["args"] == list(args) for j in self.queue):
+            return
+        self.queue.append(dict(kind=kind, take=take, args=list(args), label=label or self.JOB_LABEL[kind]))
+        if self.proc and self.proc["running"]:
+            await self.toast(f"{label or self.JOB_LABEL[kind]} de {take} : en attente")
+        self.changed()
+        if not (self.proc and self.proc["running"]):
+            asyncio.ensure_future(self.run_queue())
+
+    async def run_queue(self):
+        while self.queue and not (self.proc and self.proc["running"]):
+            job = self.queue.pop(0)
+            await self.run_job(job)
+
+    async def run_job(self, job):
+        kind, take = job["kind"], job["take"]
+        d = os.path.join(self.captures_dir, take)
+        if kind == "traiter":
+            cmd = ["traiter", self.studio_dir, d]
+        elif kind == "taille":
+            cmd = ["taille", d, str(job["args"][0]), "--studio", self.studio_dir]
+        else:
+            cmd = ["animer", self.studio_dir, d, job["args"][0]]
+        cmd = [sys.executable, "-u", "-m", "mocapcam", *cmd]
         env = dict(os.environ, PYTHONPATH=ROOT, PYTHONIOENCODING="utf-8")
-        self.proc = dict(take=take, running=True, ok=None)
-        await self.broadcast(dict(type="log", line=f"=== Traitement de {take} ===", reset=True))
+        self.proc = dict(take=take, running=True, ok=None, kind=kind, label=job["label"], step=0, step_label="")
+        await self.broadcast(dict(type="log", line=f"=== {job['label']} : {take} ===", reset=True))
         self.changed()
         p = await asyncio.create_subprocess_exec(*cmd, cwd=ROOT, env=env, stdout=asyncio.subprocess.PIPE,
-                                                 stderr=asyncio.subprocess.STDOUT)
+                                                 stderr=asyncio.subprocess.STDOUT,
+                                                 creationflags=CREATE_NO_WINDOW)
         self.proc["pid"] = p.pid
-        async for line in p.stdout:
-            await self.broadcast(dict(type="log", line=line.decode("utf-8", "replace").rstrip()))
+        async for raw in p.stdout:
+            line = raw.decode("utf-8", "replace").rstrip()
+            m = re.match(r"\s*(\d)/6 (.+)", line)
+            if m:
+                self.proc.update(step=int(m.group(1)), step_label=m.group(2).rstrip("…. "))
+                self.changed()
+            await self.broadcast(dict(type="log", line=line))
         rc = await p.wait()
         self.proc.update(running=False, ok=(rc == 0))
-        await self.toast(f"Traitement de {take} terminé" if rc == 0 else f"Échec du traitement de {take}",
-                         "info" if rc == 0 else "error")
+        if rc == 0:
+            done = {"traiter": f"Prise {take} traitée", "taille": f"{take} : {job['label'].lower()} terminée",
+                    "animer": f"{take} : {job['label'].lower()} terminée"}[kind]
+            await self.toast(done, "ok")
+        else:
+            await self.toast(f"Échec : {job['label'].lower()} de {take} (voir le journal dans Prises)", "error")
         self.changed()
+        if self.queue:
+            asyncio.ensure_future(self.run_queue())
 
-    def open_folder(self, take=None):
-        d = os.path.join(self.captures_dir, safe_name(take)) if take else self.captures_dir
+    # ------------------------------------------------------------------ personnages
+    async def handle_character_upload(self, request):
+        """POST /character?name=…&filename=… : fichier du personnage (FBX, GLB, .blend ou .zip)."""
+        q = request.rel_url.query
+        fname = os.path.basename(q.get("filename") or "personnage.fbx")
+        ext = os.path.splitext(fname)[1].lower()
+        if ext not in (".fbx", ".glb", ".gltf", ".blend", ".zip"):
+            return web.json_response(dict(ok=False, message="formats acceptés : FBX, GLB, glTF, .blend ou .zip"))
+        base = safe_name(q.get("name") or os.path.splitext(fname)[0], "personnage").lower()
+        root = pipeline.characters_dir(self.studio_dir)
+        os.makedirs(root, exist_ok=True)
+        cid, n = base, 2
+        while os.path.exists(os.path.join(root, cid)):
+            cid, n = f"{base}_{n}", n + 1
+        d = os.path.join(root, cid)
+        os.makedirs(d)
+        path = os.path.join(d, safe_name(os.path.splitext(fname)[0], "personnage") + ext)
+        with open(path, "wb") as f:
+            async for chunk in request.content.iter_chunked(1 << 20):
+                f.write(chunk)
+        self.char_busy = dict(id=cid, name=q.get("name") or os.path.splitext(fname)[0])
+        self.changed()
+        try:
+            if ext == ".zip":
+                with zipfile.ZipFile(path) as z:
+                    for m in z.namelist():
+                        if ".." in m or m.startswith(("/", "\\")):
+                            continue
+                        z.extract(m, d)
+                os.remove(path)
+                models = [os.path.join(dp, f) for dp, _, fs in os.walk(d) for f in fs
+                          if os.path.splitext(f)[1].lower() in (".fbx", ".glb", ".gltf", ".blend")]
+                if not models:
+                    raise RuntimeError("aucun fichier FBX, GLB ou .blend dans le .zip")
+                path = sorted(models, key=lambda x: (x.count(os.sep), -os.path.getsize(x)))[0]
+            logs = []
+            loop = asyncio.get_running_loop()
+            info = await loop.run_in_executor(None, lambda: fbx.inspect_character(
+                path, os.path.join(d, "apercu.glb"), self.cfg().get("blender") or None, logs.append))
+            if not info:
+                raise RuntimeError(" ".join(x.strip() for x in logs)[-300:] or "Blender n'a pas pu ouvrir le fichier")
+            meta = dict(name=self.char_busy["name"], file=os.path.relpath(path, d), info=info,
+                        created=time.strftime("%Y-%m-%d %H:%M:%S"))
+            with open(os.path.join(d, "personnage.json"), "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2, ensure_ascii=False)
+            if not self.cfg().get("character"):
+                self.save_cfg_value("character", cid)
+            await self.toast(f"Personnage « {meta['name']} » ajouté : squelette {info.get('kind')}, "
+                             f"{info.get('mapped')} os reconnus", "ok")
+            res = dict(ok=True, id=cid)
+        except Exception as e:  # noqa: BLE001
+            shutil.rmtree(d, ignore_errors=True)
+            await self.toast(f"Personnage refusé : {e}", "error")
+            res = dict(ok=False, message=str(e))
+        self.char_busy = None
+        self.changed()
+        return web.json_response(res)
+
+    async def handle_character_glb(self, request):
+        cid = safe_name(request.match_info["cid"]).lower()
+        p = os.path.join(pipeline.characters_dir(self.studio_dir), cid, "apercu.glb")
+        if not os.path.exists(p):
+            raise web.HTTPNotFound()
+        return web.FileResponse(p, headers={"Cache-Control": "no-store"})
+
+    async def handle_take_glb(self, request):
+        take = safe_name(request.match_info["take"])
+        cid = safe_name(request.rel_url.query.get("c", "")).lower()
+        p = pipeline.character_outputs(os.path.join(self.captures_dir, take), cid)[1]
+        if not os.path.exists(p):
+            raise web.HTTPNotFound()
+        return web.FileResponse(p, headers={"Cache-Control": "no-store"})
+
+    async def handle_take_skeleton(self, request):
+        """Squelette de la prise pour l'aperçu 3D : points du corps et des mains, 30 i/s."""
+        take = safe_name(request.match_info["take"])
+        d = os.path.join(self.captures_dir, take, "mocapcam")
+        src = os.path.join(d, f"{take}.mocap.json")
+        cache = os.path.join(d, "apercu_squelette.json")
+        if not os.path.exists(src):
+            raise web.HTTPNotFound()
+        if not os.path.exists(cache) or os.path.getmtime(cache) < os.path.getmtime(src):
+            def build():
+                with open(src, encoding="utf-8") as f:
+                    data = json.load(f)
+                fps = float(data["fps"])
+                step = max(1, int(round(fps / 30)))
+                keep = list(range(23)) + list(range(91, 133))
+                frames = []
+                for fr in data["positions"][::step]:
+                    frames.append([None if fr[i] is None else [round(v, 3) for v in fr[i]] for i in keep])
+                out = dict(fps=fps / step, joints=[data["joint_names"][i] for i in keep], frames=frames,
+                           height_m=(data.get("stats") or {}).get("actor_height_m"))
+                with open(cache, "w", encoding="utf-8") as f:
+                    json.dump(out, f, separators=(",", ":"))
+            await asyncio.get_running_loop().run_in_executor(None, build)
+        return web.FileResponse(cache, headers={"Cache-Control": "no-store"})
+
+    def open_folder(self, take=None, path=None):
+        d = path or (os.path.join(self.captures_dir, safe_name(take)) if take else self.captures_dir)
         if hasattr(os, "startfile") and os.path.isdir(d):
             os.startfile(d)  # noqa: S606 (Windows)
 
@@ -629,10 +956,9 @@ class Studio:
             for c in cams:
                 await self.send(c, dict(t="unlock"))
         elif a == "check":
-            for c in cams:
-                c.check = dict(pending=True)
-                await self.send(c, dict(t="snapshot"))
-            self.changed()
+            targets = [self.cams[m["cam"]]] if m.get("cam") in self.cams else cams
+            for c in targets:
+                asyncio.ensure_future(self.request_check(c))
         elif a == "identify" and m.get("cam") in self.cams:
             await self.send(self.cams[m["cam"]], dict(t="identify"))
         elif a == "rename" and m.get("cam") in self.cams:
@@ -647,12 +973,15 @@ class Studio:
             for c in cams:
                 await self.send(c, dict(t="preview", fps=self.preview_fps))
             self.changed()
-        elif a == "lens" and m.get("cam") in self.cams:
+        elif a == "fov" and m.get("cam") in self.cams:
             c = self.cams[m["cam"]]
-            v = "ultra" if m.get("value") == "ultra" else "wide"
-            self.lens_by_name[c.name] = v
-            self._save_lens()
-            await self.send(c, dict(t="config", lens=v))
+            try:
+                v = float(m.get("value"))
+            except (TypeError, ValueError):
+                return
+            self.fov_by_name[c.name] = v
+            self._save_fov()
+            await self.send(c, dict(t="config", fov=v, lens="ultra" if v < 0.99 else "wide"))
             c.check = None   # la vérification des boules est à refaire
             self.changed()
         elif a == "prefer60":
@@ -661,9 +990,77 @@ class Studio:
                 await self.send(c, dict(t="config", prefer60=self.prefer60))
             self.changed()
         elif a == "process":
-            asyncio.ensure_future(self.process(m.get("take")))
+            await self.enqueue("traiter", m.get("take"))
+        elif a == "cancel_queue":
+            self.queue = [j for j in self.queue if j["take"] != m.get("take")]
+            self.changed()
         elif a == "open":
             self.open_folder(m.get("take"))
+        elif a == "open_characters":
+            os.makedirs(pipeline.characters_dir(self.studio_dir), exist_ok=True)
+            self.open_folder(path=pipeline.characters_dir(self.studio_dir))
+        elif a == "actor_height":
+            try:
+                v = m.get("cm")
+                v = None if v in (None, "") else round(float(v), 1)
+                if v is not None and not 50 <= v <= 260:
+                    raise ValueError
+                self.save_cfg_value("actor_height_cm", v)
+            except (TypeError, ValueError):
+                await self.toast("Taille entre 50 et 260 cm", "error")
+            self.changed()
+        elif a == "take_height":
+            take = safe_name(m.get("take"))
+            d = os.path.join(self.captures_dir, take)
+            try:
+                v = round(float(m.get("cm")), 1)
+                if not 50 <= v <= 260:
+                    raise ValueError
+            except (TypeError, ValueError):
+                await self.toast("Taille entre 50 et 260 cm", "error")
+                return
+            if os.path.exists(os.path.join(d, "mocapcam", f"{take}.mocap.json")):
+                await self.enqueue("taille", take, [v], label=f"Mise à {v:g} cm")
+            elif os.path.isdir(d):
+                mp = os.path.join(d, "take.json")
+                meta = {}
+                if os.path.exists(mp):
+                    with open(mp, encoding="utf-8") as f:
+                        meta = json.load(f)
+                meta["actor_height_cm"] = v
+                with open(mp, "w", encoding="utf-8") as f:
+                    json.dump(meta, f, indent=2, ensure_ascii=False)
+                await self.toast(f"{take} : taille {v:g} cm, utilisée au traitement", "ok")
+            self.changed()
+        elif a == "character_default":
+            cid = m.get("id") or ""
+            if cid and pipeline.get_character(self.studio_dir, cid) is None:
+                return
+            self.save_cfg_value("character", cid)
+            self.changed()
+        elif a == "character_delete":
+            cid = safe_name(m.get("id", "")).lower()
+            d = os.path.join(pipeline.characters_dir(self.studio_dir), cid)
+            if cid and os.path.isdir(d):
+                shutil.rmtree(d, ignore_errors=True)
+                if self.cfg().get("character") == cid:
+                    self.save_cfg_value("character", "")
+                await self.toast("Personnage supprimé (les FBX déjà animés restent dans les prises)")
+            self.changed()
+        elif a == "animate":
+            cid = m.get("id") or self.cfg().get("character")
+            ch = pipeline.get_character(self.studio_dir, cid) if cid else None
+            if ch is None:
+                await self.toast("Ajoutez d'abord un personnage (onglet Personnages)", "error")
+                return
+            await self.enqueue("animer", m.get("take"), [cid], label=f"Animation de {ch.get('name', cid)}")
+        elif a == "firewall":
+            ok = await asyncio.get_running_loop().run_in_executor(None, allow_firewall, self.port)
+            self.net = await asyncio.get_running_loop().run_in_executor(None, network_info, self.port)
+            await self.toast("Pare-feu : MocapCam autorisé sur tous les réseaux" if self.net.get("firewall_rule")
+                             else "Pare-feu non modifié (accord administrateur refusé ?)",
+                             "ok" if self.net.get("firewall_rule") else "warn")
+            self.changed()
         elif a == "square":
             try:
                 side = float(m.get("side"))
@@ -698,7 +1095,7 @@ class Studio:
         import segno
         buf = io.BytesIO()
         segno.make(json.dumps(self.qr_payload(), separators=(",", ":")), error="m").save(
-            buf, kind="svg", scale=6, dark="#000", light="#fff", border=2, xmldecl=True)
+            buf, kind="svg", scale=8, dark="#0b0d12", light="#fff", border=2, xmldecl=True)
         return web.Response(body=buf.getvalue(), content_type="image/svg+xml", headers={"Cache-Control": "no-store"})
 
     async def handle_index(self, request):
@@ -713,9 +1110,15 @@ class Studio:
         app.router.add_get("/preview/{cam}", self.handle_preview)
         app.router.add_get("/check/{cam}", self.handle_check)
         app.router.add_get("/qr.svg", self.handle_qr)
+        app.router.add_post("/character", self.handle_character_upload)
+        app.router.add_get("/character/{cid}/apercu.glb", self.handle_character_glb)
+        app.router.add_get("/take/{take}/apercu.glb", self.handle_take_glb)
+        app.router.add_get("/take/{take}/squelette.json", self.handle_take_skeleton)
+        app.router.add_static("/vendor/", os.path.join(UI_DIR, "vendor"), show_index=False)
 
         async def on_startup(app):
             app["pusher"] = asyncio.create_task(self.state_pusher())
+            app["net"] = asyncio.create_task(self.net_loop())
 
         app.on_startup.append(on_startup)
         return app
@@ -737,7 +1140,7 @@ def run(studio_dir, captures_dir, port=8765, open_ui=True):
     st = Studio(studio_dir, captures_dir, port)
     url = f"http://localhost:{port}"
     print(f"MocapCam Studio : {url}")
-    print(f"  adresses pour les téléphones : {', '.join(lan_addresses())} (port {port})")
+    print(f"  réseau : {', '.join(lan_addresses())} (port {port}) — connectez les téléphones avec le QR code")
     print(f"  prises enregistrées dans : {st.captures_dir}")
     print("  Laissez cette fenêtre ouverte. Ctrl+C pour quitter.")
     if open_ui:

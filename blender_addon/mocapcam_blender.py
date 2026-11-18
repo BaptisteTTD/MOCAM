@@ -1,11 +1,11 @@
 bl_info = {
     "name": "MocapCam",
     "author": "MocapCam",
-    "version": (0, 3, 2),
+    "version": (0, 4, 0),
     "blender": (3, 6, 0),
     "location": "Vue 3D > barre latérale (N) > MocapCam  |  Fichier > Importer > Animation MocapCam (.fbx)",
     "description": "Importe une animation MocapCam (FBX, squelette Mixamo) et la transfère (retarget) "
-                   "sur n'importe quelle armature aux noms Mixamo",
+                   "sur un personnage riggé (Mixamo, Unreal, Character Creator, Biped, DAZ, VRoid, Rigify)",
     "category": "Animation",
 }
 
@@ -210,28 +210,237 @@ def find_prefix(obj):
     raise RuntimeError("Aucun os 'Hips' : ce n'est pas un squelette au format Mixamo.")
 
 
-def _bone_frames(obj, prefix, posed):
-    mw = obj.matrix_world
-    out = {}
-    src = obj.pose.bones if posed else obj.data.bones
-    for b in src:
-        if not b.name.startswith(prefix):
+# --- correspondance des noms d'os : Mixamo, Unreal, Character Creator, Biped (3ds Max), DAZ,
+#     VRoid / Unity, Rigify (os DEF-)… -> noms courts Mixamo (Hips, LeftArm, LeftHandIndex1…)
+
+import re as _re
+
+_IGNORE_TOKENS = {"mixamorig", "def", "cc", "base", "bip", "j", "b", "bone", "jnt", "joint", "sk", "rig",
+                  "armature", "character", "skeleton", "c"}
+_EXCLUDE = ("twist", "ik", "pole", "target", "ctrl", "control", "mch", "org", "roll", "share", "metacarpal",
+            "carpal", "corrective", "helper", "prop", "weapon", "eye", "jaw", "tongue", "teeth", "brow",
+            "lid", "breast", "pectoral", "upperarmtwist", "nub", "attach", "socket", "camera", "tail")
+_FINGER_KEYS = (("thumb", "Thumb"), ("index", "Index"), ("middle", "Middle"), ("mid", "Middle"),
+                ("ring", "Ring"), ("pinky", "Pinky"), ("little", "Pinky"), ("small", "Pinky"))
+
+
+def _tokens(name):
+    n = _re.split(r"[:|]", name)[-1]
+    return [t.lower() for t in _re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+", n)]
+
+
+def classify_bone(name):
+    """(côté 'Left'/'Right'/None, partie, numéro) d'après le nom d'un os, ou None."""
+    toks = _tokens(name)
+    side = None
+    rest, digits = [], []
+    for i, t in enumerate(toks):
+        if t in ("l", "left") and side is None:
+            side = "Left"
+        elif t in ("r", "right") and side is None:
+            side = "Right"
+        elif t.isdigit():
+            digits.append(t)
+        elif t not in _IGNORE_TOKENS:
+            rest.append(t)
+    word = "".join(rest)
+    if word.startswith("neck") and side is None:      # Character Creator : « NeckTwist01 » = cou
+        return (None, "Neck", int(digits[-1]) if digits else 0)
+    if not word or any(x in word for x in _EXCLUDE):
+        return None
+    end = word.endswith("end") or word.endswith("top") or word.endswith("tip")
+    # doigts (Biped : « Finger0 » = pouce, « Finger01 » = pouce, 2e phalange…)
+    if "finger" in word and digits and not any(k in word for k, _ in _FINGER_KEYS):
+        d = digits[-1]
+        f = int(d[0])
+        k = 1 if len(d) == 1 else int(d[1:]) + 1
+        return (side, ("Thumb", "Index", "Middle", "Ring", "Pinky")[min(f, 4)], k) if side else None
+    for key, f in _FINGER_KEYS:
+        if key in word and (word.startswith(key) or "hand" in word or "f" + key in word or len(word) <= len(key) + 4):
+            k = int(digits[-1]) if digits else 1
+            if end:
+                k = 4
+            return (side, f, k) if side else None
+    if side:
+        if word in ("hand", "wrist"):
+            return (side, "Hand", 0)
+        if word in ("forearm", "lowerarm", "elbow", "forearmbend", "loarm", "lowarm"):
+            return (side, "ForeArm", 0)
+        if word in ("arm", "upperarm", "uparm", "shldrbend", "shldr", "upperarmbend"):
+            return (side, "Arm", 0)
+        if word in ("shoulder", "clavicle", "collar", "clav"):
+            return (side, "Shoulder", 0)
+        if word in ("upleg", "thigh", "upperleg", "thighbend", "upleg", "hip"):
+            return (side, "UpLeg", 0)
+        if word in ("leg", "calf", "shin", "lowerleg", "knee", "loleg", "lowleg"):
+            return (side, "Leg", 0)
+        if word in ("foot", "ankle"):
+            return (side, "Foot", 0)
+        if word in ("toeend", "toesend", "toetip", "toeend"):
+            return (side, "Toe_End", 0)
+        if word in ("toe", "toes", "toebase", "ball", "toesbase"):
+            return (side, "ToeBase", 0)
+        return None
+    if word in ("hips", "hip", "pelvis", "root", "cog"):
+        return (None, "Hips", 0)
+    if word.startswith("spine") or word in ("chest", "upperchest", "waist", "abdomen", "abdomenlower",
+                                            "abdomenupper", "chestlower", "chestupper", "torso", "back"):
+        return (None, "Spine", int(digits[-1]) if digits else 0)
+    if word.startswith("neck"):
+        return (None, "Neck", int(digits[-1]) if digits else 0)
+    if word == "head":
+        return (None, "Head", 0)
+    if word in ("headtop", "headend", "headtopend", "headnub"):
+        return (None, "HeadTop_End", 0)
+    return None
+
+
+def _depth(b):
+    d = 0
+    while b.parent is not None:
+        b, d = b.parent, d + 1
+    return d
+
+
+def _chain(b, top):
+    """Os de b (exclu) jusqu'à top (exclu), en remontant."""
+    out = []
+    p = b.parent
+    while p is not None and p != top:
+        out.append(p)
+        p = p.parent
+    return out[::-1] if p == top else None
+
+
+def bone_map(obj):
+    """{nom court Mixamo : nom de l'os} pour une armature (noms Mixamo ou d'un autre rig)."""
+    bones = obj.data.bones
+    try:                               # squelette Mixamo : simple préfixe
+        pre = find_prefix(obj)
+        m = {b.name[len(pre):]: b.name for b in bones if b.name.startswith(pre)}
+        if all(k in m for k in ("Hips", "LeftArm", "LeftUpLeg", "RightUpLeg", "Head")):
+            return m
+    except RuntimeError:
+        pass
+    # Rigify (os DEF-spine, DEF-spine.001…) : la colonne n'a pas de nom de partie
+    names = {b.name for b in bones}
+    if "DEF-spine" in names and "DEF-spine.006" in names:
+        pre = {"Hips": "DEF-spine", "Spine": "DEF-spine.001", "Spine1": "DEF-spine.002",
+               "Spine2": "DEF-spine.003", "Neck": "DEF-spine.004", "Head": "DEF-spine.006"}
+    else:
+        pre = {}
+    cands = {}
+    for b in bones:
+        c = classify_bone(b.name)
+        if c is None:
             continue
-        m = mw @ (b.matrix if posed else b.matrix_local)
-        tail = mw @ ((b.tail if posed else b.tail_local))
-        out[b.name[len(prefix):]] = (np.array(m.translation), np_mat(m.to_3x3().normalized()),
-                                     np.array(tail))
+        side, part, k = c
+        cands.setdefault((side, part), []).append((k, b))
+    m = dict(pre)
+
+    def pick(lst):          # os déformant, le plus haut dans la hiérarchie
+        return sorted(lst, key=lambda kb: (not kb[1].use_deform, _depth(kb[1]), kb[0]))[0][1]
+
+    for side in ("Left", "Right"):
+        for part in ("Shoulder", "Arm", "ForeArm", "Hand", "UpLeg", "Leg", "Foot", "ToeBase", "Toe_End"):
+            lst = cands.get((side, part))
+            if lst:
+                m.setdefault(f"{side}{part}", pick(lst).name)
+        for f in FINGERS:
+            lst = cands.get((side, f), [])
+            # phalanges dans l'ordre de la hiérarchie (numérotation 0/1 selon les rigs)
+            lst = sorted(lst, key=lambda kb: (_depth(kb[1]), kb[0]))
+            seen = []
+            for k, b in lst:
+                if b.name not in seen:
+                    seen.append(b.name)
+            for i, nm in enumerate(seen[:4]):
+                m.setdefault(f"{side}Hand{f}{i + 1}", nm)
+    if "Head" not in m and cands.get((None, "Head")):
+        m["Head"] = pick(cands[(None, "Head")]).name
+    if "HeadTop_End" not in m and cands.get((None, "HeadTop_End")):
+        m["HeadTop_End"] = pick(cands[(None, "HeadTop_End")]).name
+    need = ("LeftUpLeg", "RightUpLeg", "LeftArm", "RightArm", "Head")
+    if any(k not in m for k in need):
+        missing = [k for k in need if k not in m]
+        raise RuntimeError("Squelette non reconnu (os introuvables : " + ", ".join(missing) + "). "
+                           "Noms d'os pris en charge : Mixamo, Unreal, Character Creator, Biped, DAZ, VRoid, Rigify.")
+    B = {b.name: b for b in bones}
+    lu, ru, head = B[m["LeftUpLeg"]], B[m["RightUpLeg"]], B[m["Head"]]
+    if "Hips" not in m:
+        # bassin : l'ancêtre commun le plus bas des deux cuisses et de la tête
+        anc = []
+        p = lu.parent
+        while p is not None:
+            anc.append(p)
+            p = p.parent
+        common = [a for a in anc if a in _ancestors(ru) and a in _ancestors(head)]
+        if not common:
+            raise RuntimeError("Squelette non reconnu : pas de bassin commun aux deux jambes.")
+        m["Hips"] = common[0].name
+    hips = B[m["Hips"]]
+    if "Neck" not in m:
+        necks = sorted(cands.get((None, "Neck"), []), key=lambda kb: _depth(kb[1]))
+        if necks:
+            m["Neck"] = necks[0][1].name
+    if "Spine" not in m:
+        top = B[m["Neck"]] if "Neck" in m else head
+        ch = _chain(top, hips) or []
+        ch = [b for b in ch if not any(b.name == v for v in m.values()) and "neck" not in b.name.lower()]
+        if ch:
+            if len(ch) >= 3:
+                pickc = [ch[0], ch[len(ch) // 2], ch[-1]]
+            elif len(ch) == 2:
+                pickc = [ch[0], None, ch[1]]
+            else:
+                pickc = [None, None, ch[0]]
+            for k, b in zip(("Spine", "Spine1", "Spine2"), pickc):
+                if b is not None:
+                    m[k] = b.name
+    return m
+
+
+def _ancestors(b):
+    out = []
+    p = b.parent
+    while p is not None:
+        out.append(p)
+        p = p.parent
     return out
 
 
-def virtual_joints(obj, prefix, posed=False):
+def _resolve_map(obj, bmap):
+    """bmap : dict nom court -> os, ou préfixe (str, ancien appel), ou None (détection)."""
+    if bmap is None:
+        return bone_map(obj)
+    if isinstance(bmap, str):
+        return {b.name[len(bmap):]: b.name for b in obj.data.bones if b.name.startswith(bmap)}
+    return bmap
+
+
+def _bone_frames(obj, bmap, posed):
+    bmap = _resolve_map(obj, bmap)
+    mw = obj.matrix_world
+    out = {}
+    src = obj.pose.bones if posed else obj.data.bones
+    for short, name in bmap.items():
+        b = src.get(name)
+        if b is None:
+            continue
+        m = mw @ (b.matrix if posed else b.matrix_local)
+        tail = mw @ ((b.tail if posed else b.tail_local))
+        out[short] = (np.array(m.translation), np_mat(m.to_3x3().normalized()), np.array(tail))
+    return out
+
+
+def virtual_joints(obj, bmap=None, posed=False):
     """Points équivalents aux 133 points capturés, calculés depuis les os
     (pose de repos, ou pose courante si posed=True)."""
-    rest = _bone_frames(obj, prefix, False)
-    cur = _bone_frames(obj, prefix, True) if posed else rest
+    rest = _bone_frames(obj, bmap, False)
+    cur = _bone_frames(obj, bmap, True) if posed else rest
     H = {k: v[0] for k, v in rest.items()}
     lat = nrm(H["LeftUpLeg"] - H["RightUpLeg"])
-    up0 = H["Neck"] - H["Hips"]
+    up0 = H.get("Neck", H["Head"]) - H["Hips"]
     up = nrm(up0 - np.dot(up0, lat) * lat)
     fwd = np.cross(lat, up)
     leg = (np.linalg.norm(H["LeftUpLeg"] - H["LeftLeg"]) + np.linalg.norm(H["LeftLeg"] - H["LeftFoot"]))
@@ -253,28 +462,54 @@ def virtual_joints(obj, prefix, posed=False):
         attach(f"{s}_eye", "Head", sc * (0.10 * up + 0.08 * fwd + sg * 0.032 * lat))
     for s, side, h, sg in (("l", "Left", "lh", 1), ("r", "Right", "rh", -1)):
         attach(f"{s}_shoulder", f"{side}Arm")
-        attach(f"{s}_elbow", f"{side}ForeArm")
-        attach(f"{s}_wrist", f"{side}Hand")
+        if f"{side}ForeArm" in rest:
+            attach(f"{s}_elbow", f"{side}ForeArm")
+        else:
+            tail_of(f"{s}_elbow", f"{side}Arm")
+        hand = f"{side}Hand" if f"{side}Hand" in rest else None
+        if hand:
+            attach(f"{s}_wrist", hand)
+        else:
+            tail_of(f"{s}_wrist", f"{side}ForeArm" if f"{side}ForeArm" in rest else f"{side}Arm")
         attach(f"{s}_hip", f"{side}UpLeg")
-        attach(f"{s}_knee", f"{side}Leg")
-        attach(f"{s}_ankle", f"{side}Foot")
+        if f"{side}Leg" in rest:
+            attach(f"{s}_knee", f"{side}Leg")
+        else:
+            tail_of(f"{s}_knee", f"{side}UpLeg")
+        if f"{side}Foot" in rest:
+            attach(f"{s}_ankle", f"{side}Foot")
+        else:
+            tail_of(f"{s}_ankle", f"{side}Leg")
         out = sg * lat
+        foot = f"{side}Foot" if f"{side}Foot" in rest else (f"{side}Leg" if f"{side}Leg" in rest else f"{side}UpLeg")
         if f"{side}Toe_End" in rest:
             tip_bone, tip_off = f"{side}Toe_End", np.zeros(3)
-        else:
+        elif f"{side}ToeBase" in rest:
             tip_bone = f"{side}ToeBase"
             tip_off = rest[tip_bone][2] - rest[tip_bone][0]
+        else:
+            tip_bone, tip_off = foot, (rest[foot][2] - rest[foot][0]) + sc * 0.15 * fwd
         attach(f"{s}_big_toe", tip_bone, tip_off - sc * 0.02 * out)
         attach(f"{s}_small_toe", tip_bone, tip_off + sc * (0.03 * out - 0.03 * fwd))
-        attach(f"{s}_heel", f"{side}Foot", sc * (-0.065 * up - 0.05 * fwd))
-        attach(f"{h}_0", f"{side}Hand")
-        for f, base in (("Thumb", 1), ("Index", 5), ("Middle", 9), ("Ring", 13), ("Pinky", 17)):
+        attach(f"{s}_heel", foot, sc * (-0.065 * up - 0.05 * fwd))
+        hb = hand or (f"{side}ForeArm" if f"{side}ForeArm" in rest else f"{side}Arm")
+        attach(f"{h}_0", hb, (rest[hb][2] - rest[hb][0]) if not hand else np.zeros(3))
+        hdir = nrm(rest[hb][2] - rest[hb][0])
+        palm = sc * 0.09
+        side_v = nrm(np.cross(hdir, up)) if abs(np.dot(hdir, up)) < 0.95 else fwd
+        base0 = (rest[hb][2] - rest[hb][0]) if not hand else np.zeros(3)
+        for f, base, lat_off in (("Thumb", 1, 0.03), ("Index", 5, 0.022), ("Middle", 9, 0.0),
+                                 ("Ring", 13, -0.02), ("Pinky", 17, -0.04)):
             for k in range(4):
                 bn = f"{side}Hand{f}{k + 1}"
                 if bn in rest:
                     attach(f"{h}_{base + k}", bn)
-                else:
+                elif k > 0 and f"{side}Hand{f}{k}" in rest:
                     tail_of(f"{h}_{base + k}", f"{side}Hand{f}{k}")
+                else:
+                    # pas d'os de doigt (main « moufle ») : points posés dans le prolongement de la main
+                    attach(f"{h}_{base + k}", hb,
+                           base0 + hdir * palm * (1.0 + 0.3 * k) + side_v * sc * lat_off * sg)
     return J
 
 
@@ -308,9 +543,10 @@ def apply_motion(obj, J_mocap, fps, start_frame=1, root_mode="RELATIVE", action_
     clean=False : pas de lissage (source déjà propre, ex. une autre armature).
     twist : {os: (T,3)} références de torsion imposées (retarget : la torsion de chaque os
     de la source est reprise telle quelle au lieu d'être recalculée depuis les points)."""
-    prefix = find_prefix(obj)
+    bmap = bone_map(obj)
+    rev = {v: k for k, v in bmap.items()}
     Jm = derive(dict(J_mocap))
-    Jr = derive(virtual_joints(obj, prefix, posed=False))
+    Jr = derive(virtual_joints(obj, bmap, posed=False))
     specs = bone_specs()
     T = next(iter(J_mocap.values())).shape[0]
     mw = np_mat(obj.matrix_world)
@@ -322,7 +558,7 @@ def apply_motion(obj, J_mocap, fps, start_frame=1, root_mode="RELATIVE", action_
     report = {"animated": 0, "static": 0}
 
     for b in _ordered_bones(arm):
-        short = b.name[len(prefix):] if b.name.startswith(prefix) else None
+        short = rev.get(b.name)
         Rb = rest_rot[b.name]
         p = b.parent
         Mb = None
@@ -708,14 +944,14 @@ def armature_motion(context, src, frame_start, frame_end, with_twist=False):
     armature animée aux noms Mixamo (ex. un FBX MocapCam importé).
     with_twist=True : renvoie aussi, pour chaque os, sa référence de torsion de repos tournée
     avec l'os ; elle reste solidaire de l'os, donc jamais parallèle à lui (pas de bascule)."""
-    prefix = find_prefix(src)
+    bmap = bone_map(src)
     sc = context.scene
     back = sc.frame_current
     frames = []
     refs = {}
     if with_twist:
-        rest = _bone_frames(src, prefix, False)
-        Jr = derive(virtual_joints(src, prefix, posed=False))
+        rest = _bone_frames(src, bmap, False)
+        Jr = derive(virtual_joints(src, bmap, posed=False))
         ref0 = {}
         with np.errstate(invalid="ignore"):
             for short, (_, rfn) in bone_specs().items():
@@ -728,9 +964,9 @@ def armature_motion(context, src, frame_start, frame_end, with_twist=False):
     try:
         for f in range(frame_start, frame_end + 1):
             sc.frame_set(f)
-            frames.append(virtual_joints(src, prefix, posed=True))
+            frames.append(virtual_joints(src, bmap, posed=True))
             for short in refs:
-                R = np_mat((mw @ src.pose.bones[prefix + short].matrix).to_3x3().normalized())
+                R = np_mat((mw @ src.pose.bones[bmap[short]].matrix).to_3x3().normalized())
                 refs[short].append(R @ ref0[short])
     finally:
         sc.frame_set(back)
@@ -825,16 +1061,20 @@ def _key_rest_pose(obj, frame):
     return keyed
 
 
-def export_fbx(context, obj, filepath, rest_frame=True):
+def export_fbx(context, obj, filepath, rest_frame=True, meshes=()):
     """Exporte l'armature et son animation en FBX, comme une animation Mixamo
     « sans skin » : os 'mixamorig:', Y vers le haut, personnage face à +Z, sans os de bout
     ajoutés, toutes les images gardées (pas de simplification). La pose de repos du fichier
-    est celle de l'armature (T-pose pour le squelette MocapCam)."""
+    est celle de l'armature (T-pose pour le squelette MocapCam).
+    meshes : maillages du personnage à exporter avec (textures intégrées au FBX)."""
     if context.mode != "OBJECT":
         bpy.ops.object.mode_set(mode="OBJECT")
     for o in context.view_layer.objects:
         o.select_set(False)
     obj.select_set(True)
+    for m in meshes:
+        m.hide_set(False)
+        m.select_set(True)
     context.view_layer.objects.active = obj
     sc = context.scene
     back = sc.frame_current
@@ -853,8 +1093,10 @@ def export_fbx(context, obj, filepath, rest_frame=True):
         keyed = _key_rest_pose(obj, f_rest)
         sc.frame_set(f_rest)
     try:
+        extra = dict(path_mode="COPY", embed_textures=True, mesh_smooth_type="FACE") if meshes else {}
         bpy.ops.export_scene.fbx(
-            filepath=filepath, use_selection=True, object_types={"ARMATURE"},
+            filepath=filepath, use_selection=True, object_types={"ARMATURE", "MESH"} if meshes else {"ARMATURE"},
+            **extra,
             axis_forward="-Z", axis_up="Y", apply_unit_scale=True, global_scale=1.0,
             apply_scale_options="FBX_SCALE_NONE",
             add_leaf_bones=False, primary_bone_axis="Y", secondary_bone_axis="X",
@@ -890,10 +1132,135 @@ def capture_to_fbx(src, dst, root_mode="RELATIVE"):
     return rep
 
 
+# --------------------------------------------------------------------------- personnage (sans interface)
+
+CHARACTER_EXT = (".fbx", ".glb", ".gltf", ".blend")
+
+
+def load_character(context, path):
+    """Importe un personnage riggé (FBX, glTF/GLB ou .blend). Renvoie (armature, maillages)."""
+    ext = os.path.splitext(path)[1].lower()
+    before = set(bpy.data.objects)
+    if ext == ".fbx":
+        bpy.ops.import_scene.fbx(filepath=path, use_anim=False, ignore_leaf_bones=False,
+                                 automatic_bone_orientation=False)
+    elif ext in (".glb", ".gltf"):
+        bpy.ops.import_scene.gltf(filepath=path)
+    elif ext == ".blend":
+        with bpy.data.libraries.load(path, link=False) as (data_from, data_to):
+            data_to.objects = list(data_from.objects)
+        for o in data_to.objects:
+            if o is not None and o.name not in context.scene.collection.objects:
+                context.scene.collection.objects.link(o)
+    else:
+        raise RuntimeError(f"Format non pris en charge : {ext} (FBX, GLB/glTF ou .blend)")
+    new = [o for o in bpy.data.objects if o not in before]
+    arms = [o for o in new if o.type == "ARMATURE"]
+    if not arms:
+        raise RuntimeError("Aucun squelette (armature) dans ce fichier : le personnage doit être riggé.")
+    best, err = None, None
+    for a in sorted(arms, key=lambda o: -len(o.data.bones)):
+        try:
+            bone_map(a)
+            best = a
+            break
+        except RuntimeError as e:
+            err = e
+    if best is None:
+        raise err
+    meshes = [o for o in new if o.type == "MESH" and (
+        o.parent == best or any(md.type == "ARMATURE" and md.object == best for md in o.modifiers))]
+    # pose de repos (l'animation éventuelle du fichier est ignorée)
+    if best.animation_data:
+        best.animation_data.action = None
+    for pb in best.pose.bones:
+        pb.matrix_basis = Matrix.Identity(4)
+    return best, meshes
+
+
+def character_info(arm, meshes):
+    m = bone_map(arm)
+    tris = 0
+    zs = []
+    for o in meshes:
+        me = o.data
+        tris += sum(len(p.vertices) - 2 for p in me.polygons)
+        zs += [(o.matrix_world @ Vector(c)).z for c in o.bound_box]
+    if not zs:
+        zs = [(arm.matrix_world @ b.head_local).z for b in arm.data.bones]
+    return dict(armature=arm.name, kind=rig_kind(arm), bones=len(arm.data.bones), mapped=len(m),
+                fingers=sum(1 for k in m if "Hand" in k and k[-1].isdigit()), meshes=len(meshes),
+                triangles=tris, height=round(max(zs) - min(zs), 3) if zs else None)
+
+
+def export_glb(context, objs, filepath, animated=True):
+    """GLB pour l'aperçu 3D de MocapCam Studio (navigateur)."""
+    for o in context.view_layer.objects:
+        o.select_set(False)
+    for o in objs:
+        o.hide_set(False)
+        o.select_set(True)
+    context.view_layer.objects.active = objs[0]
+    kw = dict(filepath=filepath, export_format="GLB", use_selection=True, export_animations=animated,
+              export_skins=True, export_yup=True)
+    try:
+        bpy.ops.export_scene.gltf(**kw, export_animation_mode="ACTIVE_ACTIONS", export_force_sampling=True)
+    except (TypeError, RuntimeError):
+        bpy.ops.export_scene.gltf(**kw)
+    return filepath
+
+
+def inspect_character(path, glb_path=None):
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    arm, meshes = load_character(bpy.context, path)
+    info = character_info(arm, meshes)
+    if glb_path:
+        export_glb(bpy.context, [arm] + meshes, glb_path, animated=False)
+    return info
+
+
+def retarget_file(anim_path, char_path, out_fbx, root_mode="RELATIVE", glb_path=None):
+    """Animation FBX (MocapCam ou Mixamo) -> personnage riggé animé (FBX avec maillage)."""
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    context = bpy.context
+    dst, meshes = load_character(context, char_path)
+    src = import_animation(context, anim_path)
+    take = src.name
+    rep = transfer_motion(context, src, dst, root_mode, action_name=take)
+    for o in [src] + list(src.children_recursive):
+        bpy.data.objects.remove(o, do_unlink=True)
+    act = dst.animation_data.action
+    sc = context.scene
+    sc.frame_start, sc.frame_end = (int(round(v)) for v in act.frame_range)
+    sc.name = take
+    export_fbx(context, dst, out_fbx, meshes=meshes)
+    if glb_path:
+        fps = anim_fps(dst)
+        if fps:
+            set_scene_fps(sc, fps)
+        export_glb(context, [dst] + meshes, glb_path, animated=True)
+    rep.update(character=character_info(dst, meshes), fbx=out_fbx, glb=glb_path)
+    return rep
+
+
 def main_cli():
-    """blender -b --factory-startup --python <ce fichier> -- capture.mocap.json sortie.fbx [RELATIVE|ABSOLUTE]"""
+    """blender -b --factory-startup --python <ce fichier> -- …
+      capture.mocap.json sortie.fbx [RELATIVE|ABSOLUTE]          capture -> squelette Mixamo animé
+      retarget anim.fbx personnage.fbx sortie.fbx [RELATIVE|ABSOLUTE] [apercu.glb]
+      inspect personnage.fbx [apercu.glb]"""
     import sys
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+    if argv and argv[0] == "retarget":
+        if len(argv) < 4:
+            raise SystemExit("usage : -- retarget anim.fbx personnage sortie.fbx [RELATIVE|ABSOLUTE] [apercu.glb]")
+        rep = retarget_file(argv[1], argv[2], argv[3], argv[4] if len(argv) > 4 else "RELATIVE",
+                            argv[5] if len(argv) > 5 else None)
+        print(f"MOCAPCAM_RETARGET_OK {json.dumps(rep, default=str)}")
+        return
+    if argv and argv[0] == "inspect":
+        info = inspect_character(argv[1], argv[2] if len(argv) > 2 else None)
+        print(f"MOCAPCAM_INSPECT_OK {json.dumps(info)}")
+        return
     if len(argv) < 2:
         raise SystemExit("usage : -- capture.mocap.json sortie.fbx [RELATIVE|ABSOLUTE]")
     rep = capture_to_fbx(argv[0], argv[1], argv[2] if len(argv) > 2 else "RELATIVE")
@@ -930,7 +1297,7 @@ def import_animation(context, filepath):
     if not arms:
         raise RuntimeError("Aucune armature dans ce FBX.")
     arm = max(arms, key=lambda o: len(o.data.bones))
-    find_prefix(arm)                                # vérifie les noms Mixamo
+    bone_map(arm)                                   # vérifie que le squelette est reconnu
     arm.name = os.path.splitext(os.path.basename(filepath))[0]
     if anim_fps(arm) is None:
         arm[FPS_PROP] = scene_fps(context.scene)
@@ -1061,14 +1428,31 @@ def _wanted_fps(context):
     return None
 
 
+def rig_kind(obj):
+    """Nom lisible du type de squelette (Mixamo, Unreal…)."""
+    names = [b.name for b in obj.data.bones]
+    try:
+        find_prefix(obj)
+        if any(n.endswith("LeftArm") for n in names):
+            return "Mixamo"
+    except RuntimeError:
+        pass
+    j = " ".join(names)
+    for key, label in (("CC_Base_", "Character Creator"), ("Bip0", "Biped (3ds Max)"), ("J_Bip_", "VRoid"),
+                       ("DEF-spine", "Rigify"), ("upperarm_l", "Unreal"), ("lShldr", "DAZ")):
+        if key in j:
+            return label
+    return "autre"
+
+
 def _prefix_label(lay, o):
     if o is None:
         return
     try:
-        p = find_prefix(o)
-        lay.label(text=f"os Mixamo, préfixe « {p} »", icon="CHECKMARK")
+        m = bone_map(o)
+        lay.label(text=f"squelette {rig_kind(o)}, {len(m)} os reconnus", icon="CHECKMARK")
     except RuntimeError:
-        lay.label(text="pas de noms d'os Mixamo", icon="ERROR")
+        lay.label(text="squelette non reconnu", icon="ERROR")
 
 
 class MOCAPCAM_PT_panel(bpy.types.Panel):

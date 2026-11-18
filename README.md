@@ -4,18 +4,22 @@ MocapCam transforme deux vidéos filmées au téléphone en une animation 3D, av
 et les doigts : un **FBX au squelette Mixamo**, prêt pour Blender, Unity, Unreal…
 
 Trois éléments :
-* **l'app MocapCam** sur chaque téléphone : elle filme avec des réglages fixes (1080p 60 i/s,
-  objectif ×1, stabilisation coupée, exposition bloquée) ;
+* **l'app MocapCam** sur chaque téléphone : elle se connecte au PC en scannant un QR code et
+  filme avec des réglages fixes (1080p 60 i/s, stabilisation coupée, exposition bloquée), avec
+  le champ de vision de votre choix (×0,5 à ×2) ;
 * **MocapCam Studio** sur le PC : vous y voyez les caméras, vérifiez les boules, lancez et
-  arrêtez l'enregistrement de tous les téléphones d'un clic, et les vidéos arrivent toutes seules ;
-* **l'add-on Blender**, pour importer l'animation (FBX) et la transférer sur votre personnage.
+  arrêtez l'enregistrement de tous les téléphones d'un clic, traitez les prises, les regardez en
+  3D et les appliquez directement sur **votre propre personnage riggé** ;
+* **l'add-on Blender**, pour importer l'animation (FBX) et la transférer sur un personnage
+  dans Blender.
 
 ```
 iPhone + Poco ─► calage par le bip du PC ─► position + objectif des caméras grâce aux boules au sol
               ─► détection 2D corps + mains (IA RTMW) ─► synchro fine par le mouvement
               ─► affinage des caméras avec le corps
               ─► triangulation 3D ─► affinage global du mouvement (os rigides, fluidité, pieds posés)
-              ─► prise.fbx (squelette Mixamo animé) ─► add-on Blender : retarget sur votre personnage
+              ─► mise à la taille de l'acteur (en cm)
+              ─► prise.fbx (squelette Mixamo animé) ─► votre personnage animé (Studio ou add-on Blender)
 ```
 
 ---
@@ -74,12 +78,13 @@ Elles forment un **carré** dont la taille dépend de votre pièce (1,5 à 3 m d
 | D | jaune | l'autre coin voisin de A : (0 ; L) |
 | E | rouge | **au milieu** du côté A-D : (0 ; L/2) |
 
-* **Mesurez au mètre ruban**, d'un centre de boule à l'autre : les 4 côtés égaux, et les
-  **2 diagonales égales** (= L × 1,41), sinon le carré est un losange. E doit être pile au milieu
-  de A-D, sur la ligne. Une erreur de 2-3 cm est acceptable, 10 cm ne l'est plus.
-* Indiquez le côté L dans MocapCam Studio : **Préparation > Carré des boules**, puis *Enregistrer*.
-  Si la valeur est fausse, tout le mouvement est à la mauvaise échelle (le traitement l'affiche :
-  « taille estimée de l'acteur »).
+* Seule **la forme** compte, pas la taille : les 4 côtés égaux et les **2 diagonales égales**
+  (vérifiez au mètre ruban, sinon le carré est un losange). E doit être pile au milieu de A-D,
+  sur la ligne. Une erreur de 2-3 cm est acceptable, 10 cm ne l'est plus.
+* **L'échelle vient de la taille de l'acteur**, indiquée en cm dans Studio (case *Taille de
+  l'acteur*, à côté du nom de la prise) : le squelette exporté fait exactement cette taille,
+  pieds au sol. Inutile de mesurer le côté du carré. (Sans taille indiquée, l'échelle vient du
+  carré décrit dans `studio.json` (2,5 m de côté par défaut), et le traitement affiche la taille obtenue.)
 * Le sens n'a pas d'importance : le carré peut tourner dans un sens ou dans l'autre (B et C à
   gauche ou à droite de la ligne A-D), le logiciel s'en rend compte tout seul. Si deux boules de
   couleurs différentes sont échangées, il le détecte aussi et le signale.
@@ -89,7 +94,7 @@ Elles forment un **carré** dont la taille dépend de votre pièce (1,5 à 3 m d
   Une boule cachée par l'acteur pendant la prise ne pose pas de problème.
 * Le logiciel calcule la position des caméras **à chaque prise**, tout seul. Vous pouvez donc
   déplacer les trépieds d'une séance à l'autre sans rien recalibrer. Ne déplacez pas les boules
-  entre deux prises (sinon remesurez).
+  pendant une prise.
 * Il n'y a **aucune autre calibration à faire**, pas de damier. Les boules donnent une première
   estimation de la position et de l'objectif de chaque téléphone. Pendant le traitement, les
   mouvements de l'acteur, vus par les deux caméras, servent ensuite à affiner tout ça.
@@ -97,9 +102,16 @@ Elles forment un **carré** dont la taille dépend de votre pièce (1,5 à 3 m d
 
 ## 3. Réglages des téléphones
 
-**Avec l'app MocapCam, il n'y a rien à régler** : elle impose elle-même 1080p 60 i/s, l'objectif ×1,
+**Avec l'app MocapCam, il n'y a rien à régler** : elle impose elle-même 1080p 60 i/s,
 la stabilisation coupée et une image sans HDR. Studio affiche ce que chaque téléphone a
 réellement accepté.
+
+**Champ de vision** : choisissez-le dans l'app (barre du bas) ou dans Studio (sous l'image de
+chaque caméra) : **×0,5** (ultra grand-angle), ×0,7, **×1**, ×1,5 ou ×2. Chaque téléphone retient
+son réglage. ×1 est le plus précis ; prenez ×0,5 ou ×0,7 dans une petite pièce, quand l'acteur
+sort du cadre, et ×1,5 ou ×2 si les caméras sont loin. Seules les valeurs que le téléphone sait
+faire sont proposées. Changer de champ de vision entre deux prises ne demande aucune
+calibration : vérifiez simplement les boules à nouveau.
 
 **Cadrage** : ce que montre Studio est exactement ce qui est filmé. Sur Android, l'app filme
 en **4:3 (1440×1080)**, c'est-à-dire tout le capteur, comme l'aperçu : en 16:9, le téléphone
@@ -138,29 +150,71 @@ de l'estimation automatique.
 
 ## 6. Faire une prise avec MocapCam Studio (recommandé)
 
+Studio a trois onglets : **Tournage** (caméras et enregistrement), **Prises** (traitement et
+aperçu 3D) et **Personnages** (vos modèles riggés). La roue dentée, en haut à droite, ouvre les
+réglages (cadence, réseau, dossiers).
+
+**Connecter les téléphones** (uniquement par QR code) :
 1. Double-cliquez sur **`MocapCam Studio.bat`**. Une fenêtre noire (le serveur, à laisser ouverte)
-   et l'interface s'ouvrent. La première fois, **Windows demande l'autorisation réseau :
-   acceptez pour les réseaux privés**, sinon les téléphones ne pourront pas se connecter.
-2. Sur chaque téléphone, ouvrez l'app **MocapCam**, donnez-lui son nom (`iphone`, `poco`)
-   et **scannez le QR code** affiché dans Studio. Le PC et les téléphones doivent être sur
-   le même Wi-Fi, pas un réseau « invité ».
-3. Dans Studio, chaque caméra montre son image en direct, son nombre d'images par seconde,
-   sa stabilisation (qui doit être *off*), sa batterie et l'état de son horloge. Ensuite :
+   et l'interface s'ouvrent.
+2. Mettez le PC et les téléphones sur **le même réseau** : votre Wi-Fi (pas un réseau
+   « invité »), ou **le partage de connexion d'un des téléphones** (pas besoin de box) : activez-le
+   sur le téléphone, connectez-y le PC et l'autre téléphone. Le téléphone qui partage sa
+   connexion peut filmer lui aussi.
+3. Sur chaque téléphone, ouvrez l'app **MocapCam**, donnez-lui son nom (`iphone`, `poco`)
+   et **scannez le QR code** de la carte *Ajouter un autre téléphone*. Le QR code contient
+   toutes les adresses du PC : le téléphone essaie les chemins en même temps et garde celui qui
+   répond. Ensuite, *Reprendre la dernière connexion* évite de rescanner.
+4. Si Windows classe le réseau comme **« public »** (fréquent avec un partage de connexion), Studio
+   l'affiche avec un bouton **Autoriser MocapCam** : il ouvre le pare-feu pour MocapCam
+   seulement, après l'accord de l'administrateur. Le bouton est aussi dans les réglages.
+
+**Tourner** :
+1. Chaque carte de caméra montre l'image en direct, le **champ de vision** (à changer d'un clic),
+   la cadence, la stabilisation (qui doit être *off*), l'exposition, la batterie et l'horloge.
    * **Identifier** : le nom de la caméra s'affiche en grand sur le téléphone ;
-   * **Vérifier les boules** : pour chaque caméra, le nombre de boules vues (il en faut au moins 4)
-     et une image de contrôle ;
-   * **Bloquer l'exposition**, une fois la lumière réglée. L'option *obturation rapide* (iPhone)
-     réduit le flou des mains.
-4. **● Enregistrer** : tous les téléphones démarrent en même temps, puis le PC émet un **bip**
+   * **Vérifier** (ligne *Boules au sol*) : un clic suffit, Studio redemande l'image si le
+     téléphone ne répond pas. Le petit carré de 5 points montre quelles boules sont vues ;
+     *Voir* ouvre l'image de contrôle. Le bouton *Vérifier* de la colonne de droite vérifie
+     toutes les caméras d'un coup.
+2. Dans la colonne de droite, entrez le **nom de la prise** et la **taille de l'acteur en cm**
+   (pieds nus ou chaussé, comme il jouera). La liste *Avant de filmer* passe au vert quand tout
+   est prêt : caméras, boules, exposition bloquée (bouton *Bloquer*, ou *Auto* pour la débloquer),
+   taille, horloges. L'option *obturation rapide* réduit le flou des mains.
+3. **● Enregistrer** : tous les téléphones démarrent en même temps, puis le PC émet un **bip**
    qui sert à les synchroniser à la milliseconde près. Gardez le son du PC allumé et assez fort.
    Pas besoin de clap.
-5. Jouez l'action (T-pose 2 s, puis une dizaine de secondes de marche dans la zone si l'action
+4. Jouez l'action (T-pose 2 s, puis une dizaine de secondes de marche dans la zone si l'action
    est statique), puis **■ Arrêter**. Les vidéos sont envoyées automatiquement au PC, dans
    `captures\prise_XXX\`.
-6. Dans la liste **Prises**, cliquez **Traiter**. Le déroulement s'affiche dans le panneau
-   *Traitement*. Le résultat est **`captures\prise_XXX\prise_XXX.fbx`** : l'animation sur un
-   squelette Mixamo (voir section 8). Le sous-dossier `mocapcam\` contient les données de
-   travail (vidéos normalisées, détections, contrôles), inutiles pour l'utilisation.
+
+**Traiter** (onglet **Prises**) : choisissez la prise, puis **Traiter la prise**. Les 6 étapes
+s'affichent avec leur avancement ; plusieurs prises peuvent attendre leur tour. Le résultat :
+* **`captures\prise_XXX\prise_XXX.fbx`** : l'animation sur un squelette Mixamo (section 8),
+  à la taille indiquée ;
+* un **aperçu 3D** dans Studio (squelette ou personnage, lecture, image par image) ;
+* si un personnage par défaut est choisi, **`prise_XXX_<personnage>.fbx`**, votre personnage animé.
+
+La taille de l'acteur peut être corrigée après coup dans le panneau de la prise
+(*Taille de l'acteur*, puis **Appliquer**) : c'est immédiat, sans retraiter, et le FBX est refait.
+Le sous-dossier `mocapcam\` contient les données de travail (vidéos normalisées, détections,
+contrôles), inutiles pour l'utilisation.
+
+### Animer votre propre personnage
+
+Onglet **Personnages** : glissez le fichier de votre personnage riggé (**FBX, GLB/glTF, .blend**,
+ou un **.zip** avec ses textures), donnez-lui un nom. Studio l'analyse avec Blender et affiche
+sa vignette, son nombre d'os et le type de squelette reconnu : **Mixamo, Unreal (UE4/UE5),
+Character Creator, Biped 3ds Max, VRoid, DAZ, Rigify**, ou des noms usuels (`upperarm_l`,
+`LeftForeArm`, `Hand.R`…). Les doigts sont animés s'il en a.
+
+* Bouton **Animer après chaque traitement** : ce personnage est animé automatiquement à la fin
+  de chaque traitement.
+* Pour une prise déjà traitée : onglet *Prises*, liste *Animer un personnage*, choisissez-le puis
+  **Animer**. L'aperçu 3D peut alors montrer le personnage au lieu du squelette.
+* Le résultat garde le maillage, les matériaux et la pose de repos du personnage ; seule son
+  animation est ajoutée (même transfert que l'add-on Blender : directions des os et torsions de
+  la capture, déplacement mis à l'échelle de ses jambes).
 
 ## 7. Sans l'app : vidéos filmées à la main
 
@@ -204,6 +258,12 @@ Utilisation :
 
 Pour refaire un FBX : `mocapcam fbx captures\prise_XXX` (ou `--blender "C:\...\blender.exe"`
 si Blender n'est pas trouvé ; le chemin peut aussi être mis dans `studio.json`, clé `blender`).
+
+En ligne de commande, comme les boutons de Studio :
+* `mocapcam taille captures\prise_XXX 178` : met une prise traitée à la taille de l'acteur
+  (en cm) et refait ses FBX ;
+* `mocapcam animer studio captures\prise_XXX alpha` : anime le personnage `alpha` (dossier
+  `studio\personnages\alpha\`) avec la prise.
 
 **Dans Blender, avec l'add-on MocapCam** (barre latérale, touche N > onglet **MocapCam**) :
 1. **Animation** : *Importer une animation (.fbx)* (aussi dans *Fichier > Importer > Animation
@@ -258,7 +318,9 @@ dans `3dsmax\test\resultat.txt`.
 |---|---|
 | `cameras` | noms des caméras, donc des fichiers vidéo. Ajoutez un 3ᵉ téléphone ici. |
 | `marker_height` | hauteur du centre visible des boules : 0,4 × le rayon pour une demi-boule (0,016 m pour une boule de 8 cm coupée en deux) |
-| `markers[].position` | positions en mètres. Pour un carré, réglez plutôt le côté dans Studio. |
+| `markers[].position` | positions en mètres. Seule la forme compte quand la taille de l'acteur est indiquée. |
+| `actor_height_cm` | taille de l'acteur, réglée depuis Studio (chaque prise garde la sienne dans `take.json`) |
+| `character` | personnage animé après chaque traitement (dossier dans `personnages\`), réglé depuis Studio |
 | `sync_by_motion` | `true` : après le bip, la synchro est affinée avec le mouvement de l'acteur. Dans un téléphone, le son et l'image peuvent être décalés de plusieurs dizaines de ms (100 ms mesurées sur un Poco X3) : sans cette correction, les gestes rapides tremblent. |
 | `blender` | chemin de `blender.exe` pour le FBX, si Blender n'est pas trouvé tout seul |
 | `fbx` | `false` pour ne pas créer de FBX |
@@ -275,17 +337,19 @@ dans `3dsmax\test\resultat.txt`.
 
 | Problème | Solution |
 |---|---|
-| « Boules introuvables ou incohérentes » | Regardez `fond_*.jpg` : moins de 4 boules visibles, boules trop petites, couleur délavée (HDR activé ?), éclairage trop faible (ajustez `hsv`), ou carré mal mesuré. |
+| « Boules introuvables ou incohérentes » | Regardez `fond_*.jpg` : moins de 4 boules visibles, boules trop petites, couleur délavée (HDR activé ?), éclairage trop faible (ajustez `hsv`), ou carré déformé (côtés ou diagonales inégaux). |
 | « boules … semblent échangées » | Deux boules ne sont pas à la place du tableau. C'est pris en compte : vous pouvez les laisser ainsi. |
-| « taille peu plausible » | Le côté du carré indiqué dans Studio ne correspond pas à la réalité : remesurez-le, enregistrez-le, puis retraitez la prise (rapide : la détection 2D est gardée). |
+| « taille peu plausible » ou personnage trop grand / trop petit | Indiquez la taille de l'acteur en cm : onglet *Prises*, *Taille de l'acteur*, **Appliquer** (immédiat, sans retraiter). |
 | Erreur de calibration > 4 px | Normal avant l'affinage par le corps si les boules sont un peu mal placées. Au-delà de 10 px : une boule mal mesurée, ou une tache de même couleur confondue avec une boule. |
 | « Format d'image différent » | Seulement avec le damier optionnel : il a été filmé dans une autre orientation ou une autre résolution. |
-| Le téléphone ne trouve pas le PC | Même Wi-Fi (pas « invité ») ; autorisez Python dans le pare-feu Windows (réseaux privés) ; essayez l'adresse affichée sous le QR code. |
+| Le téléphone ne trouve pas le PC | Même réseau (pas un Wi-Fi « invité ») ; sur un partage de connexion ou un réseau « public », cliquez **Autoriser MocapCam** dans Studio ; si le PC a changé de réseau, rescannez le QR code (l'ancien contient les anciennes adresses). |
+| Personnage refusé ou mal animé | Studio indique les os qu'il n'a pas reconnus. Il faut un squelette humanoïde (bassin, colonne, cou, tête, bras, jambes) ; renommer les os à la Mixamo (`LeftArm`, `LeftForeArm`…) marche toujours. Blender doit être installé. |
 | Signal sonore « peu audible » | Montez le volume du PC. Sinon, la synchro se fait par les horloges, à environ une image près. |
 | « Stabilisation » différente de *off* | Le téléphone ne permet pas de la couper à 60 i/s : réessayez à 30 i/s, ou acceptez une précision un peu moindre. |
 | L'app iPhone ne s'ouvre plus | Les 7 jours sont passés : réinstallez-la avec Sideloadly. |
 | « FBX non créé : Blender introuvable » | Installez Blender (blender.org), ou indiquez son chemin dans `studio.json`, clé `blender`. |
 | Vidéo plus serrée que l'aperçu | Mettez à jour l'app (1.0.5 ou plus). |
+| Pas de choix de champ de vision dans l'app | Mettez à jour l'app (1.1.0 ou plus). |
 | « Pas assez de points communs » | L'acteur est trop peu visible par les deux caméras à la fois. Rapprochez les caméras de l'axe de jeu. |
 | Doigts qui tremblent | Rapprochez les caméras, éclairez mieux, baissez `cutoff_hands_hz` à 5–6. |
 | Bras qui tressautent dans les gestes rapides | Vérifiez dans le journal la ligne « synchro fine par le mouvement » ; montez la lumière (moins de flou de bougé) et bloquez l'exposition avec l'obturation rapide. |
@@ -295,10 +359,12 @@ dans `3dsmax\test\resultat.txt`.
 
 * `python tests/test_synthetique.py` (nécessite `pip install bpy`) simule une capture complète :
   bruit, inversions gauche/droite, mains cachées, personne parasite. Il vérifie chaque étape
-  jusqu'au résultat dans Blender, sur trois types de squelettes.
+  jusqu'au résultat dans Blender, sur plusieurs types de squelettes (Mixamo, Unreal, Biped,
+  Character Creator), et la mise à la taille de l'acteur.
 * `python tests/test_studio.py` (nécessite `pip install playwright`) pilote MocapCam Studio dans un
-  navigateur avec deux faux téléphones : connexion, vérification des boules, enregistrement, bip,
-  rapatriement et synchronisation.
+  navigateur avec deux faux téléphones : connexion par QR code, vérification des boules en un
+  clic, champ de vision, taille de l'acteur, enregistrement, bip, rapatriement, synchronisation
+  et traitement.
 
 Le code de l'app mobile est dans `mobile\MocapCamPhone` (Expo + VisionCamera 5). `PROTOCOLE.md`
 décrit les échanges entre le PC et les téléphones.

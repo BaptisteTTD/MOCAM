@@ -1,7 +1,7 @@
 // Connexion au PC (MocapCam Studio) : WebSocket + reconnexion automatique.
 
 export type StudioCommand =
-  | { t: 'welcome'; id: string; name: string; prefer60?: boolean; preview?: number; lens?: 'wide' | 'ultra' }
+  | { t: 'welcome'; id: string; name: string; prefer60?: boolean; preview?: number; lens?: 'wide' | 'ultra'; fov?: number }
   | { t: 'ping'; s0: number }
   | { t: 'arm'; take: string }
   | { t: 'start'; take: string; at: number }
@@ -12,7 +12,7 @@ export type StudioCommand =
   | { t: 'identify' }
   | { t: 'rename'; name: string }
   | { t: 'preview'; fps: number }
-  | { t: 'config'; prefer60?: boolean; preview?: number; lens?: 'wide' | 'ultra' }
+  | { t: 'config'; prefer60?: boolean; preview?: number; lens?: 'wide' | 'ultra'; fov?: number }
   | { t: 'error'; message: string }
 
 export interface ConnectInfo {
@@ -28,18 +28,16 @@ export function toJson(v: unknown): string {
 
 export type ConnState = 'idle' | 'connecting' | 'connected' | 'error'
 
+/** QR code affiché par MocapCam Studio (seul moyen de connexion). */
 export function parseQr(value: string): ConnectInfo | null {
   try {
     const d = JSON.parse(value)
-    if (d && d.mocapcam && Array.isArray(d.hosts) && d.port && d.token) {
+    if (d && d.mocapcam && Array.isArray(d.hosts) && d.hosts.length && d.port && d.token) {
       return { hosts: d.hosts.map(String), port: Number(d.port), token: String(d.token) }
     }
   } catch {
-    // pas du JSON : adresse saisie à la main "192.168.1.20:8765"
+    // pas un QR code de MocapCam Studio
   }
-  // saisie à la main : "192.168.1.20:8765 ab12cd34" (adresse + code affichés dans Studio)
-  const m = /^\s*([\w.\-]+)(?::(\d+))?(?:[\s,;]+([0-9a-fA-F]{4,16}))?\s*$/.exec(value)
-  if (m) return { hosts: [m[1]], port: Number(m[2] ?? 8765), token: (m[3] ?? '').toLowerCase() }
   return null
 }
 
@@ -77,31 +75,59 @@ export class StudioClient {
     this.onState('idle')
   }
 
-  private tryHosts(i: number) {
+  /** Essaie toutes les adresses du PC en même temps (Wi-Fi, partage de connexion, câble…) :
+   *  la première qui répond est gardée. */
+  private tryHosts(_i = 0) {
     if (this.closedByUser) return
-    const hosts = this.host ? [this.host] : this.info.hosts
-    if (i >= hosts.length) {
+    const hosts = this.host ? [this.host, ...this.info.hosts.filter((h) => h !== this.host)] : this.info.hosts
+    this.onState('connecting', 'recherche du PC…')
+    let won = false
+    let pending = hosts.length
+    const sockets: WebSocket[] = []
+    const giveUp = () => {
+      if (won || this.closedByUser) return
       this.host = null
-      this.onState('error', 'PC introuvable sur le Wi-Fi, nouvel essai…')
+      this.onState('error', 'PC introuvable : même Wi-Fi (ou partage de connexion) ? Nouvel essai…')
       this.retry = setTimeout(() => this.tryHosts(0), 2000)
-      return
     }
-    const host = hosts[i]
-    this.onState('connecting', host)
-    const ws = new WebSocket(`ws://${host}:${this.info.port}/ws/phone`)
-    ws.binaryType = 'arraybuffer'
-    let opened = false
-    const timeout = setTimeout(() => {
-      if (!opened) ws.close()
-    }, 2500)
-    ws.onopen = () => {
-      opened = true
-      clearTimeout(timeout)
-      this.host = host
-      this.ws = ws
-      ws.send(toJson({ t: 'hello', token: this.info.token, ...this.getHello() }))
-      this.onState('connected', host)
+    for (const host of hosts) {
+      let ws: WebSocket
+      try {
+        ws = new WebSocket(`ws://${host}:${this.info.port}/ws/phone`)
+      } catch {
+        if (--pending === 0) giveUp()
+        continue
+      }
+      ws.binaryType = 'arraybuffer'
+      sockets.push(ws)
+      const timeout = setTimeout(() => {
+        if (!won || this.ws !== ws) ws.close()
+      }, 4000)
+      ws.onopen = () => {
+        clearTimeout(timeout)
+        if (won || this.closedByUser) {
+          ws.close()
+          return
+        }
+        won = true
+        for (const o of sockets) if (o !== ws) o.close()
+        this.attach(ws, host)
+      }
+      ws.onclose = () => {
+        clearTimeout(timeout)
+        if (!won && --pending === 0) giveUp()
+      }
+      ws.onerror = () => {
+        // onclose suit toujours
+      }
     }
+  }
+
+  private attach(ws: WebSocket, host: string) {
+    this.host = host
+    this.ws = ws
+    ws.send(toJson({ t: 'hello', token: this.info.token, ...this.getHello() }))
+    this.onState('connected', host)
     ws.onmessage = (ev) => {
       if (typeof ev.data !== 'string') return
       let cmd: StudioCommand
@@ -118,15 +144,10 @@ export class StudioClient {
       this.onCommand(cmd)
     }
     ws.onclose = () => {
-      clearTimeout(timeout)
       if (this.ws === ws) this.ws = null
       if (this.closedByUser) return
-      if (!opened) {
-        this.tryHosts(i + 1)
-      } else {
-        this.onState('connecting', 'connexion perdue, reconnexion…')
-        this.retry = setTimeout(() => this.tryHosts(0), 1000)
-      }
+      this.onState('connecting', 'connexion perdue, reconnexion…')
+      this.retry = setTimeout(() => this.tryHosts(0), 1000)
     }
     ws.onerror = () => {
       // onclose suit toujours
