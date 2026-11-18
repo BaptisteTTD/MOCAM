@@ -457,6 +457,51 @@ def test_fbx(path):
        f"{os.path.getsize(dst) / 1e6:.1f} Mo")
 
 
+def test_rig_preview(path):
+    """Rig Mixamo par défaut : le FBX reste sans maillage, l'aperçu GLB porte le mannequin skinné."""
+    import bpy
+    from mathutils import Vector
+    import mocapcam_blender as mb
+    dst = os.path.join(OUT, "test_rig.fbx")
+    glb = os.path.join(OUT, "test_rig.glb")
+    rep = mb.capture_to_fbx(path, dst, glb_path=glb)
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.import_scene.fbx(filepath=dst)
+    fbx_meshes = [o for o in bpy.data.objects if o.type == "MESH"]
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.import_scene.gltf(filepath=glb)
+    arm = [o for o in bpy.data.objects if o.type == "ARMATURE"][0]
+    # (l'import glTF ajoute une petite sphère pour dessiner les os : on prend le maillage skinné)
+    meshes = [o for o in bpy.data.objects if o.type == "MESH" and any(m.type == "ARMATURE" for m in o.modifiers)]
+    me = meshes[0] if meshes else None
+    skinned = me is not None and any(m.type == "ARMATURE" and m.object == arm for m in me.modifiers)
+    act = arm.animation_data.action if arm.animation_data else None
+    # le maillage suit le rig : la tête du mannequin reste autour de l'os de la tête
+    err = 9.0
+    if skinned and act:
+        sc = bpy.context.scene
+        f = int((act.frame_range[0] + act.frame_range[1]) / 2)
+        sc.frame_set(f)
+        dg = bpy.context.evaluated_depsgraph_get()
+        ev = me.evaluated_get(dg).to_mesh()
+        hb = next(b for b in arm.pose.bones if b.name.endswith("Head"))
+        vg = me.vertex_groups[hb.name].index
+        pts = [me.matrix_world @ v.co for v, v0 in zip(ev.vertices, me.data.vertices)
+               if any(g.group == vg for g in v0.groups)]
+        c = sum(pts, Vector()) / len(pts)
+        head = arm.matrix_world @ ((hb.head + hb.tail) / 2)
+        err = (c - head).length
+        me.evaluated_get(dg).to_mesh_clear()
+    # l'import glTF convertit le temps à la cadence de la scène : on compare des durées
+    dur = (act.frame_range[1] - act.frame_range[0]) / bpy.context.scene.render.fps if act else 0
+    dur_ref = (rep["frames"] - 1) / rep["fps"]
+    ok("rig Mixamo par défaut (aperçu avec mannequin)",
+       not fbx_meshes and skinned and len(arm.data.bones) >= 60 and abs(dur - dur_ref) < 0.05 and err < 0.15,
+       f"FBX sans maillage, GLB : mannequin de {len(me.data.vertices) if me else 0} sommets, "
+       f"{dur:.2f} s animées (capture {dur_ref:.2f} s), tête du mannequin à {err * 100:.1f} cm de l'os, "
+       f"{os.path.getsize(glb) / 1e6:.1f} Mo")
+
+
 def test_transfer(path):
     """Retarget armature -> armature : FBX MocapCam importé -> personnage Mixamo en A-pose,
     échelle 0,01, tourné de 90°, plus petit (comme un perso téléchargé sur Mixamo)."""
@@ -892,6 +937,7 @@ if __name__ == "__main__":
     test_blender(path, X_gt)
     test_height(path)
     test_fbx(path)
+    test_rig_preview(path)
     test_transfer(path)
     test_rigs(path)
     n_ok = sum(1 for v in RESULTS.values() if v[0])

@@ -34,6 +34,8 @@ from . import fbx, markers as mk, pipeline, sync
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "studio_ui")
+# version du serveur : l'interface (index.html) vérifie qu'elle parle au serveur de la même version
+STUDIO_VERSION = "1.2.0"
 
 # horloge du PC en ms (monotone, calée sur l'heure système au démarrage)
 _EPOCH = time.time() * 1000 - time.monotonic() * 1000
@@ -211,6 +213,7 @@ class Studio:
         self.net = dict(hosts=lan_addresses(), ssid=None, public=False, firewall_rule=None, adapters=[])
         self.queue = []             # traitements en attente
         self.char_busy = None       # import de personnage en cours
+        self.rig_locks = {}         # aperçus « rig Mixamo » en cours de création, par prise
         self.has_blender = bool(fbx.find_blender(self.cfg().get("blender") or None))
 
     def _fov_path(self):
@@ -319,7 +322,7 @@ class Studio:
             prefer60=self.prefer60, preview_fps=self.preview_fps,
             actor_height_cm=cfg.get("actor_height_cm"),
             characters=pipeline.list_characters(self.studio_dir), character=cfg.get("character") or "",
-            char_busy=self.char_busy, blender=self.has_blender,
+            char_busy=self.char_busy, blender=self.has_blender, version=STUDIO_VERSION,
         )
 
     def qr_payload(self):
@@ -893,6 +896,30 @@ class Studio:
             raise web.HTTPNotFound()
         return web.FileResponse(p, headers={"Cache-Control": "no-store"})
 
+    async def handle_take_rig(self, request):
+        """Rig Mixamo animé de la prise, avec le mannequin (GLB) ; créé à la demande pour les
+        prises traitées avant MocapCam Studio 1.2."""
+        take = safe_name(request.match_info["take"])
+        tdir = os.path.join(self.captures_dir, take)
+        src = os.path.join(tdir, "mocapcam", f"{take}.mocap.json")
+        p = pipeline.rig_preview_path(tdir)
+        fresh = os.path.exists(p) and (not os.path.exists(src) or os.path.getmtime(p) >= os.path.getmtime(src) - 1)
+        if not fresh:
+            if not os.path.exists(src) or not self.has_blender:
+                raise web.HTTPNotFound()
+            lock = self.rig_locks.setdefault(take, asyncio.Lock())
+            async with lock:
+                if not (os.path.exists(p) and os.path.getmtime(p) >= os.path.getmtime(src) - 1):
+                    logs = []
+                    rep = await asyncio.get_running_loop().run_in_executor(
+                        None, lambda: fbx.rig_preview(src, p, self.cfg().get("blender") or None, logs.append))
+                    if not rep or not os.path.exists(p):
+                        return web.Response(status=500, text=" ".join(x.strip() for x in logs)[-300:] or "aperçu non créé")
+        return web.FileResponse(p, headers={"Cache-Control": "no-store"})
+
+    async def handle_rig_mixamo(self, request):
+        return web.FileResponse(os.path.join(UI_DIR, "rig_mixamo.glb"), headers={"Cache-Control": "max-age=3600"})
+
     async def handle_take_skeleton(self, request):
         """Squelette de la prise pour l'aperçu 3D : points du corps et des mains, 30 i/s."""
         take = safe_name(request.match_info["take"])
@@ -1098,12 +1125,16 @@ class Studio:
             buf, kind="svg", scale=8, dark="#0b0d12", light="#fff", border=2, xmldecl=True)
         return web.Response(body=buf.getvalue(), content_type="image/svg+xml", headers={"Cache-Control": "no-store"})
 
+    async def handle_version(self, request):
+        return web.json_response(dict(app="MocapCam Studio", version=STUDIO_VERSION, pid=os.getpid()))
+
     async def handle_index(self, request):
         return web.FileResponse(os.path.join(UI_DIR, "index.html"), headers={"Cache-Control": "no-store"})
 
     def app(self):
         app = web.Application(client_max_size=8 * 1024 ** 3)
         app.router.add_get("/", self.handle_index)
+        app.router.add_get("/version", self.handle_version)
         app.router.add_get("/ws/ui", self.handle_ui)
         app.router.add_get("/ws/phone", self.handle_phone)
         app.router.add_post("/upload", self.handle_upload)
@@ -1114,6 +1145,8 @@ class Studio:
         app.router.add_get("/character/{cid}/apercu.glb", self.handle_character_glb)
         app.router.add_get("/take/{take}/apercu.glb", self.handle_take_glb)
         app.router.add_get("/take/{take}/squelette.json", self.handle_take_skeleton)
+        app.router.add_get("/take/{take}/rig.glb", self.handle_take_rig)
+        app.router.add_get("/rig_mixamo.glb", self.handle_rig_mixamo)
         app.router.add_static("/vendor/", os.path.join(UI_DIR, "vendor"), show_index=False)
 
         async def on_startup(app):
@@ -1136,15 +1169,90 @@ def open_window(url):
     webbrowser.open(url)
 
 
+def _port_free(port):
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("0.0.0.0", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+def _running_studio(port):
+    """Version du MocapCam Studio qui occupe déjà le port ("ancienne" s'il ne la donne pas), ou None."""
+    import urllib.error
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/version", timeout=3) as r:
+            return json.loads(r.read().decode("utf-8")).get("version") or "ancienne"
+    except urllib.error.HTTPError:
+        try:      # pas de /version : une version d'avant 1.2 répond quand même sur /qr.svg
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/qr.svg", timeout=3):
+                return "ancienne"
+        except (OSError, ValueError):
+            return None
+    except (OSError, ValueError):
+        return None
+
+
+def _listening_pids(port):
+    """Windows : processus qui écoutent sur le port."""
+    rc, out = _run(["netstat", "-ano", "-p", "tcp"])
+    pids = set()
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and parts[1].endswith(f":{port}") and parts[3].upper() in ("LISTENING", "ÉCOUTE", "ECOUTE"):
+            if parts[4].isdigit() and int(parts[4]) != os.getpid():
+                pids.add(int(parts[4]))
+    if not pids:
+        rc, out = _run(["powershell", "-NoProfile", "-Command",
+                        f"(Get-NetTCPConnection -LocalPort {port} -State Listen).OwningProcess"])
+        pids = {int(x) for x in out.split() if x.isdigit() and int(x) != os.getpid()}
+    return pids
+
+
+def _stop_old_studio(port):
+    """Ferme un MocapCam Studio d'une autre version qui occupe le port. True si le port est libéré."""
+    if not sys.platform.startswith("win"):
+        return False
+    for pid in _listening_pids(port):
+        rc, out = _run(["powershell", "-NoProfile", "-Command",
+                        f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"])
+        if "mocapcam" not in out.lower():
+            continue
+        _run(["taskkill", "/PID", str(pid), "/T", "/F"])
+    for _ in range(40):
+        if _port_free(port):
+            return True
+        time.sleep(0.25)
+    return False
+
+
 def run(studio_dir, captures_dir, port=8765, open_ui=True):
-    st = Studio(studio_dir, captures_dir, port)
     url = f"http://localhost:{port}"
-    print(f"MocapCam Studio : {url}")
-    print(f"  réseau : {', '.join(lan_addresses())} (port {port}) — connectez les téléphones avec le QR code")
+    if not _port_free(port):
+        other = _running_studio(port)
+        if other == STUDIO_VERSION:
+            print(f"MocapCam Studio est déjà ouvert ({url}) : sa fenêtre est réaffichée.")
+            if open_ui:
+                open_window(url)
+            return
+        if other and _stop_old_studio(port):
+            print(f"Un MocapCam Studio d'une autre version ({other}) tournait encore : il a été fermé "
+                  "et remplacé par celui-ci. Vous pouvez fermer son ancienne fenêtre noire.")
+        else:
+            print(f"Le port {port} est déjà utilisé" + (f" par MocapCam Studio ({other})" if other else
+                                                        " par un autre programme") +
+                  " : fermez-le (ou fermez les autres fenêtres noires de MocapCam), puis relancez.")
+            return
+    st = Studio(studio_dir, captures_dir, port)
+    print(f"MocapCam Studio {STUDIO_VERSION} : {url}")
+    print(f"  réseau : {', '.join(st.net.get('hosts') or lan_addresses())} (port {port}) — connectez les téléphones avec le QR code")
     print(f"  prises enregistrées dans : {st.captures_dir}")
     print("  Laissez cette fenêtre ouverte. Ctrl+C pour quitter.")
     if open_ui:
-        asyncio.get_event_loop_policy()
         threading_open = __import__("threading").Timer(1.0, open_window, args=(url,))
         threading_open.start()
     web.run_app(st.app(), host="0.0.0.0", port=port, print=None, access_log=None)

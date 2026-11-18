@@ -207,6 +207,34 @@ async def main():
                                            "window.playChirp=function(){window.onChirp();o&&o();};});")
                 await page.goto(BASE)
                 await page.wait_for_timeout(800)
+                # interface et serveur de la même version, QR code affiché avant tout téléphone
+                fatal = await page.locator("#fatal").is_visible()
+                qr_w = await page.evaluate("(() => { const i = document.querySelector('img.qr'); return i ? i.naturalWidth : 0 })()")
+                async with session.get(BASE + "/version") as r:
+                    ver = (await r.json()).get("version")
+                ok("interface affichée, QR code visible dès l'ouverture", not fatal and qr_w > 50 and ver,
+                   f"version {ver}, QR {qr_w} px")
+                # 2e lancement de la même version : ne casse rien, se contente de rouvrir la fenêtre
+                second = subprocess.run([sys.executable, "-m", "mocapcam", "studio", "--sans-fenetre", "--port", str(PORT),
+                                         "--studio", STUDIO, "--captures", CAPT], cwd=ROOT, env=env,
+                                        capture_output=True, text=True, timeout=30)
+                ok("relance de Studio déjà ouvert", second.returncode == 0 and "déjà ouvert" in second.stdout
+                   and srv.poll() is None, second.stdout.strip()[-120:])
+                # serveur d'une autre version : l'interface le dit au lieu de rester vide
+                await page.evaluate("ws.onmessage({data: JSON.stringify({...S, type: 'state', version: '0.9'})})")
+                fatal_txt = await page.locator("#fatal").inner_text() if await page.locator("#fatal").is_visible() else ""
+                ok("ancienne version du serveur signalée", "relancé" in fatal_txt, fatal_txt.splitlines()[0] if fatal_txt else "rien d'affiché")
+                await page.reload()
+                await page.wait_for_timeout(800)
+                # rig Mixamo fourni : carte « Sortie par défaut » dans Personnages
+                await page.locator(".tab", has_text="Personnages").click()
+                await page.wait_for_timeout(1500)
+                card = await page.locator(".char").first.inner_text()
+                thumb = await page.locator(".char .thumb img").count()
+                ok("rig Mixamo par défaut dans Personnages", "Rig Mixamo" in card and "Sortie par défaut" in card and thumb >= 1,
+                   card.replace("\n", " | ")[:110])
+                await page.screenshot(path=os.path.join(D, "studio_personnages.png"))
+                await page.locator(".tab", has_text="Tournage").click()
                 phones = [FakePhone("iphone", 0, 123456.0, 15, crash_after_upload=True), FakePhone("poco", 1, -98765.0, 40)]
                 tasks = [asyncio.create_task(ph.run(info, session, harness)) for ph in phones]
                 await page.wait_for_timeout(3500)

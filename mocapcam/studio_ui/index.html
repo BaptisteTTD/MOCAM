@@ -193,6 +193,10 @@
   .modal { position: fixed; inset: 0; background: #000c; display: none; align-items: center; justify-content: center; z-index: 30; }
   .modal.on { display: flex; }
   .modal img { max-width: 92vw; max-height: 88vh; border-radius: 8px; }
+  #fatal { position: fixed; inset: 0; background: #0b0d12f2; display: none; align-items: center; justify-content: center; z-index: 60; padding: 30px; }
+  #fatal > div { max-width: 620px; background: var(--ink-1); border: 1px solid var(--line); border-radius: 12px; padding: 26px 28px; }
+  #fatal h2 { margin: 0 0 10px; font-size: 19px; }
+  #fatal p { margin: 0; line-height: 1.55; color: var(--muted); white-space: pre-line; }
   #disc { position: fixed; inset: 0; background: #0b0d12e6; display: none; align-items: center; justify-content: center; font-size: 17px; z-index: 50; text-align: center; padding: 30px; }
   .empty-page { display: grid; place-items: center; color: var(--muted); padding: 40px; text-align: center; }
 </style>
@@ -256,7 +260,7 @@
     <div class="drop" id="drop">
       <div>
         <h2>Ajouter un personnage riggé</h2>
-        <p class="hint">Glissez le fichier ici : FBX, GLB/glTF, .blend, ou un .zip avec ses textures. Squelettes reconnus : Mixamo, Unreal, Character Creator, Biped, DAZ, VRoid, Rigify. Le personnage par défaut est animé à la fin de chaque traitement.</p>
+        <p class="hint">Glissez le fichier ici : FBX, GLB/glTF, .blend, ou un .zip avec ses textures. Squelettes reconnus : Mixamo, Unreal, Character Creator, Biped, DAZ, VRoid, Rigify. Sans personnage, chaque prise sort sur le rig Mixamo.</p>
         <p class="hint err-t" id="noBlender" style="display:none;margin-top:6px">Blender est nécessaire pour lire les personnages : installez-le (gratuit), puis relancez MocapCam Studio.</p>
         <p class="hint" id="charBusy" style="display:none;margin-top:6px"></p>
       </div>
@@ -300,9 +304,12 @@
 <div id="toasts" aria-live="polite"></div>
 <div class="modal" id="modal"><img id="modalImg" alt="Image de vérification des boules"></div>
 <div id="disc">Connexion à MocapCam Studio perdue.<br>La fenêtre noire du serveur est-elle toujours ouverte ?</div>
+<div id="fatal"><div><h2 id="fatalT"></h2><p id="fatalD"></p></div></div>
 
 <script>
 let ws, S = null, serverDelta = 0, takeTyped = false, selTake = null, logText = '';
+const UI_VERSION = '1.2.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
+function fatal(title, detail) { $('fatalT').textContent = title; $('fatalD').textContent = detail; $('fatal').style.display = 'flex'; }
 // aperçu 3D : remplacé par le module three.js dès qu'il est chargé
 window.mcViewer = window.mcViewer || { show() {}, toggle() { return true; }, seek() {} };
 window.mcRerender = () => { if (S) renderTakeDetail(true); };
@@ -318,7 +325,17 @@ function connect() {
   ws.onclose = () => { $('disc').style.display = 'flex'; setTimeout(connect, 1000); };
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
-    if (m.type === 'state') { S = m; serverDelta = m.now - Date.now(); render(); }
+    if (m.type === 'state') {
+      S = m; serverDelta = m.now - Date.now();
+      if (S.version !== UI_VERSION) {
+        fatal('MocapCam Studio doit être relancé',
+              `Cette fenêtre est d'une version plus récente (${UI_VERSION}) que le serveur qui tourne encore (${S.version || 'ancienne version'}).\n\nFermez la fenêtre noire « MocapCam Studio », puis relancez MocapCam Studio.bat.`);
+        return;
+      }
+      $('fatal').style.display = 'none';
+      try { render(); }
+      catch (e) { console.error(e); fatal('Erreur d\'affichage', `${e.message}\n\nRelancez MocapCam Studio.bat. Si l'erreur revient, envoyez ce message.`); }
+    }
     else if (m.type === 'preview') { const img = document.querySelector(`img[data-prev="${m.cam}"]`); if (img) img.src = `/preview/${m.cam}?t=${m.ts}`; }
     else if (m.type === 'log') { if (m.reset) logText = ''; logText += m.line + '\n'; const l = $('log'); if (l) { l.textContent = logText; l.scrollTop = l.scrollHeight; } }
     else if (m.type === 'toast') toast(m.msg, m.level);
@@ -568,7 +585,7 @@ function renderTakeDetail(force) {
   if (!t) { box.innerHTML = '<div class="empty-page">Les prises filmées apparaissent ici.</div>'; return; }
   const chars = S.characters;
   const animated = chars.filter(c => t.characters.includes(c.id));
-  const sources = [{ id: '', label: 'Squelette' }].concat(animated.map(c => ({ id: c.id, label: c.name })));
+  const sources = [{ id: '', label: 'Rig Mixamo' }].concat(animated.map(c => ({ id: c.id, label: c.name })));
   if (viewerSel == null || !sources.some(s => s.id === viewerSel.id && viewerSel.take === t.name)) viewerSel = { take: t.name, id: animated.length && animated.some(c => c.id === S.character) ? S.character : '' };
   const busy = running || queued;
   const stepsHtml = running && P.kind === 'traiter' ? `<div class="steps">${STEPS.map((s, i) => `<div class="step ${i + 1 < P.step ? 'done' : i + 1 === P.step ? 'cur' : ''}"><span class="n">${i + 1}</span><span>${s}</span></div>`).join('')}</div>` : '';
@@ -608,7 +625,7 @@ function renderTakeDetail(force) {
         <div class="panel">
           <div class="side-h">Fichiers</div>
           <div class="files">
-            ${t.fbx ? `<div class="file"><span class="ext">FBX</span><span>${esc(t.name)}.fbx — squelette Mixamo animé</span></div>` : '<div class="hint">Le FBX est créé à la fin du traitement.</div>'}
+            ${t.fbx ? `<div class="file"><span class="ext">FBX</span><span>${esc(t.name)}.fbx — rig Mixamo animé (65 os, sans maillage)</span></div>` : '<div class="hint">Le FBX (rig Mixamo animé) est créé à la fin du traitement.</div>'}
             ${animated.map(c => `<div class="file"><span class="ext">FBX</span><span>${esc(t.name)}_${esc(c.id)}.fbx — ${esc(c.name)} animé</span></div>`).join('')}
           </div>
           <div class="row">
@@ -651,7 +668,19 @@ function renderChars() {
   const key = JSON.stringify([S.characters, S.character]);
   if (key === charsKey) return;
   charsKey = key;
-  $('charGrid').innerHTML = S.characters.map(c => {
+  const rigDefault = !S.character || !S.characters.some(c => c.id === S.character);
+  const rigCard = `<article class="char ${rigDefault ? 'def' : ''}">
+      <div class="thumb" data-thumb="__rig">Aperçu…</div>
+      <div class="body">
+        <div class="nm">Rig Mixamo</div>
+        <div class="meta">Fourni avec MocapCam : 65 os Mixamo, corps et doigts, mannequin pour l'aperçu</div>
+        <div class="meta">Toujours exporté : prise_XXX.fbx, à la taille de l'acteur</div>
+        <div class="acts">
+          ${rigDefault ? '<span class="ok-t" style="font-size:13px">Sortie par défaut</span>' : `<button class="btn small" onclick="send({a:'character_default',id:''})">Utiliser seul</button>`}
+        </div>
+      </div>
+    </article>`;
+  $('charGrid').innerHTML = rigCard + S.characters.map(c => {
     const i = c.info || {};
     return `<article class="char ${c.id === S.character ? 'def' : ''}">
       <div class="thumb" data-thumb="${esc(c.id)}">Aperçu…</div>
@@ -666,9 +695,7 @@ function renderChars() {
         </div>
       </div>
     </article>`;
-  }).join('') + (S.characters.length ? '' : '<p class="hint">Aucun personnage pour l\'instant.</p>');
-  if (S.character && S.characters.length) $('charGrid').insertAdjacentHTML('beforeend',
-    `<p class="hint" style="grid-column:1/-1"><button class="link" onclick="send({a:'character_default',id:''})">Ne plus animer de personnage après les traitements</button></p>`);
+  }).join('');
   window.dispatchEvent(new CustomEvent('mc-thumbs'));
 }
 async function uploadChar(file) {
@@ -804,10 +831,11 @@ function applyTime() {
     S.dots.instanceMatrix.needsUpdate = true;
   }
 }
-async function showSkeleton(take) {
+async function showSkeleton(take, key) {
   const r = await fetch(`/take/${encodeURIComponent(take)}/squelette.json`);
   if (!r.ok) throw new Error('aperçu indisponible');
   const d = await r.json();
+  if (key && V.key !== key) return;
   clearContent();
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(PAIRS.length * 6), 3));
@@ -824,8 +852,9 @@ async function showSkeleton(take) {
   const bb = new THREE.Box3().setFromPoints(pts);
   frame(bb.getCenter(new THREE.Vector3()), Math.max(1.2, bb.getSize(new THREE.Vector3()).length() * 0.6));
 }
-async function showGlb(url, animated) {
+async function showGlb(url, animated, key) {
   const g = await new GLTFLoader().loadAsync(url);
+  if (key && V.key !== key) return;
   clearContent();
   g.scene.userData.content = true;
   g.scene.traverse(o => { if (o.isMesh) { o.frustumCulled = false; } });
@@ -852,8 +881,14 @@ window.mcViewer = {
     V.key = key;
     const empty = document.getElementById('viewerEmpty');
     try {
-      if (sel.id) await showGlb(`/take/${encodeURIComponent(sel.take)}/apercu.glb?c=${encodeURIComponent(sel.id)}&t=${Date.now()}`, true);
-      else await showSkeleton(sel.take);
+      if (sel.id) await showGlb(`/take/${encodeURIComponent(sel.take)}/apercu.glb?c=${encodeURIComponent(sel.id)}&t=${Date.now()}`, true, key);
+      else {
+        if (empty) empty.textContent = 'Préparation du rig Mixamo animé…';
+        // rig Mixamo + mannequin ; sans Blender (ou en cas d'échec) : points du squelette
+        try { await showGlb(`/take/${encodeURIComponent(sel.take)}/rig.glb?t=${Date.now()}`, true, key); }
+        catch (e) { if (V.key === key) await showSkeleton(sel.take, key); }
+      }
+      if (V.key !== key) return;
       if (empty) empty.remove();
     } catch (e) { if (empty) empty.textContent = 'Aperçu indisponible : ' + e.message; }
   },
@@ -873,7 +908,7 @@ async function renderThumb(el) {
     const sc = new THREE.Scene();
     sc.add(new THREE.HemisphereLight(0xdde6ff, 0x30333a, 2.4));
     const sun = new THREE.DirectionalLight(0xffffff, 2.2); sun.position.set(2, 4, 3); sc.add(sun);
-    const g = await new GLTFLoader().loadAsync(`/character/${encodeURIComponent(id)}/apercu.glb?t=${Date.now()}`);
+    const g = await new GLTFLoader().loadAsync(id === '__rig' ? '/rig_mixamo.glb' : `/character/${encodeURIComponent(id)}/apercu.glb?t=${Date.now()}`);
     sc.add(g.scene);
     const bb = new THREE.Box3().setFromObject(g.scene), c = bb.getCenter(new THREE.Vector3()), s = bb.getSize(new THREE.Vector3());
     const cam = new THREE.PerspectiveCamera(30, 1, 0.01, 1000);

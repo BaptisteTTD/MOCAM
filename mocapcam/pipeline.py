@@ -390,6 +390,12 @@ def get_character(studio_dir, cid):
     return next((c for c in list_characters(studio_dir) if c["id"] == cid), None)
 
 
+def rig_preview_path(take_dir):
+    """Aperçu 3D du rig Mixamo de la prise (avec le mannequin par défaut)."""
+    name = os.path.basename(os.path.normpath(take_dir))
+    return os.path.join(take_dir, "mocapcam", f"{name}_rig.glb")
+
+
 def character_outputs(take_dir, cid):
     name = os.path.basename(os.path.normpath(take_dir))
     return (os.path.join(take_dir, f"{name}_{cid}.fbx"),
@@ -464,13 +470,26 @@ def rescale_take(take_dir, height_cm, blender=None, log=print, studio_dir=None):
     meta["actor_height_cm"] = round(height_cm, 1)
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2, ensure_ascii=False)
+    rp = os.path.join(take_dir, "mocapcam", "rapport.json")
+    if os.path.exists(rp):                              # taille affichée par Studio
+        try:
+            with open(rp, encoding="utf-8") as f:
+                rep = json.load(f)
+            rep["actor_height_m"] = st["actor_height_m"]
+            with open(rp, "w", encoding="utf-8") as f:
+                json.dump(rep, f, indent=2, ensure_ascii=False, default=_jsonable)
+        except (OSError, ValueError):
+            pass
     log(f"{name} : squelette mis à {height_cm:.0f} cm (× {s:.3f})")
+    if os.path.exists(rig_preview_path(take_dir)):     # aperçu à l'ancienne taille : refait
+        os.remove(rig_preview_path(take_dir))
     out = path
     if blender is not False:
         cfg = load_studio(studio_dir) if studio_dir else {}
         chars = _animated_characters(take_dir, studio_dir) if studio_dir else []
         out = fbx.export(path, os.path.join(take_dir, f"{name}.fbx"),
-                         blender=blender or cfg.get("blender") or None, log=log) or path
+                         blender=blender or cfg.get("blender") or None, log=log,
+                         glb_path=rig_preview_path(take_dir)) or path
         for cid in chars:          # personnages déjà animés avec cette prise : refaits à la bonne taille
             try:
                 animate_character(take_dir, studio_dir, cid, log=log, blender=blender or cfg.get("blender") or None)
@@ -591,7 +610,8 @@ def process_take(studio_dir, take_dir, force=False, manual_delays=None, only_cal
     result = out
     if cfg.get("fbx", True):
         result = fbx.export(out, os.path.join(take_dir, f"{name}.fbx"),
-                            blender=cfg.get("blender") or None, log=log) or out
+                            blender=cfg.get("blender") or None, log=log,
+                            glb_path=rig_preview_path(take_dir)) or out
     cid = cfg.get("character")
     if cid and result.endswith(".fbx"):
         try:

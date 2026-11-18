@@ -1,7 +1,7 @@
 bl_info = {
     "name": "MocapCam",
     "author": "MocapCam",
-    "version": (0, 4, 0),
+    "version": (0, 4, 1),
     "blender": (3, 6, 0),
     "location": "Vue 3D > barre latérale (N) > MocapCam  |  Fichier > Importer > Animation MocapCam (.fbx)",
     "description": "Importe une animation MocapCam (FBX, squelette Mixamo) et la transfère (retarget) "
@@ -1115,8 +1115,10 @@ def export_fbx(context, obj, filepath, rest_frame=True, meshes=()):
     return filepath
 
 
-def capture_to_fbx(src, dst, root_mode="RELATIVE"):
-    """Sans interface (blender -b) : capture .mocap.json -> FBX d'un squelette Mixamo animé."""
+def capture_to_fbx(src, dst, root_mode="RELATIVE", glb_path=None):
+    """Sans interface (blender -b) : capture .mocap.json -> FBX d'un squelette Mixamo animé.
+    glb_path : aperçu 3D pour MocapCam Studio (rig Mixamo animé avec le mannequin par défaut).
+    dst vide : seulement l'aperçu."""
     bpy.ops.wm.read_factory_settings(use_empty=True)
     context = bpy.context
     d, J = load_motion(src)
@@ -1127,7 +1129,12 @@ def capture_to_fbx(src, dst, root_mode="RELATIVE"):
     arm = create_mixamo_armature(context, J, name="Armature")   # même nom que chez Mixamo
     arm[FPS_PROP] = float(d["fps"])
     rep = apply_motion(arm, J, d["fps"], 0, root_mode, action_name=take)
-    export_fbx(context, arm, dst)
+    if dst:
+        export_fbx(context, arm, dst)
+    if glb_path:
+        ob = build_mannequin(arm)
+        export_glb(context, [arm, ob], glb_path, animated=True)
+        rep["glb"] = glb_path
     rep.update(frames=int(d["frame_count"]), fps=float(d["fps"]), bones=len(arm.data.bones))
     return rep
 
@@ -1210,6 +1217,257 @@ def export_glb(context, objs, filepath, animated=True):
     return filepath
 
 
+# --------------------------------------------------------------------------- mannequin du rig Mixamo
+# Corps simple (segments rigides, articulations en bleu) posé sur le rig Mixamo de MocapCam :
+# c'est le « personnage » par défaut, quand aucun personnage riggé n'est importé.
+
+MANNEQUIN_NAME = "MocapCam_Mannequin"
+BODY_RGBA = (0.60, 0.63, 0.68, 1.0)
+JOINT_RGBA = (0.31, 0.50, 0.96, 1.0)
+
+
+def _basis(d, side=None):
+    d = d / max(1e-9, np.linalg.norm(d))
+    if side is None or abs(float(np.dot(nrm(side), d))) > 0.95:
+        side = np.array([1.0, 0, 0]) if abs(d[0]) < 0.9 else np.array([0, 1.0, 0])
+    x = side - np.dot(side, d) * d
+    x = x / np.linalg.norm(x)
+    return x, np.cross(d, x), d
+
+
+class _Pieces:
+    """Accumule des volumes fermés, chacun rattaché à un os (poids 1)."""
+
+    def __init__(self):
+        self.v, self.f, self.mat, self.smooth, self.groups = [], [], [], [], {}
+
+    def _add(self, verts, faces, bone, mat, smooth):
+        base = len(self.v)
+        self.v += [tuple(map(float, p)) for p in verts]
+        self.f += [tuple(base + i for i in fc) for fc in faces]
+        self.mat += [mat] * len(faces)
+        self.smooth += smooth if isinstance(smooth, list) else [smooth] * len(faces)
+        self.groups.setdefault(bone, []).extend(range(base, base + len(verts)))
+
+    def tube(self, a, b, r1, r2, bone, side=None, flat=1.0, n=16, mat=0):
+        """Cylindre (section elliptique : r le long de `side`, r × flat dans l'autre sens)."""
+        a, b = np.asarray(a, float), np.asarray(b, float)
+        if np.linalg.norm(b - a) < 1e-6:
+            return
+        x, y, _ = _basis(b - a, side)
+        ang = np.linspace(0, 2 * np.pi, n, endpoint=False)
+        ring = lambda c, r: [c + r * math.cos(t) * x + r * flat * math.sin(t) * y for t in ang]
+        verts = ring(a, r1) + ring(b, r2) + [a, b]
+        faces, smooth = [], []
+        for i in range(n):
+            j = (i + 1) % n
+            faces += [(i, j, n + j, n + i), (2 * n, j, i), (2 * n + 1, n + i, n + j)]
+            smooth += [True, False, False]
+        self._add(verts, faces, bone, mat, smooth)
+
+    def loft(self, rings, n=24, mat=0):
+        """Volume continu : anneaux elliptiques horizontaux [(centre, rx, ry, os)], fermé aux bouts.
+        Chaque anneau suit son os : le volume s'étire entre deux os au lieu de se séparer."""
+        X, Y = np.array([1.0, 0, 0]), np.array([0, 1.0, 0])
+        ang = np.linspace(0, 2 * np.pi, n, endpoint=False)
+        base = len(self.v)
+        for c, rx, ry, bone in rings:
+            self._add([c + rx * math.cos(t) * X + ry * math.sin(t) * Y for t in ang], [], bone, mat, True)
+        self._add([rings[0][0], rings[-1][0]], [], rings[0][3], mat, True)
+        self.groups[rings[0][3]].pop()
+        self.groups.setdefault(rings[-1][3], []).append(base + len(rings) * n + 1)
+        bot, top = base + len(rings) * n, base + len(rings) * n + 1
+        faces, smooth = [], []
+        for k in range(len(rings) - 1):
+            r0, r1 = base + k * n, base + (k + 1) * n
+            for i in range(n):
+                j = (i + 1) % n
+                faces.append((r0 + i, r0 + j, r1 + j, r1 + i))
+        last = base + (len(rings) - 1) * n
+        for i in range(n):
+            j = (i + 1) % n
+            faces += [(bot, base + j, base + i), (top, last + i, last + j)]
+        self.f += faces
+        self.mat += [mat] * len(faces)
+        self.smooth += [True] * len(faces)
+
+    def ellipsoid(self, c, radii, bone, axes=None, n=18, m=10, mat=0):
+        c = np.asarray(c, float)
+        ex, ey, ez = axes if axes is not None else np.eye(3)
+        verts = [c - radii[2] * ez]
+        for k in range(1, m):
+            phi = -math.pi / 2 + math.pi * k / m
+            for i in range(n):
+                t = 2 * math.pi * i / n
+                verts.append(c + radii[0] * math.cos(phi) * math.cos(t) * ex
+                             + radii[1] * math.cos(phi) * math.sin(t) * ey + radii[2] * math.sin(phi) * ez)
+        verts.append(c + radii[2] * ez)
+        top = len(verts) - 1
+        faces = [(0, 1 + (i + 1) % n, 1 + i) for i in range(n)]
+        for k in range(m - 2):
+            r0, r1 = 1 + k * n, 1 + (k + 1) * n
+            faces += [(r0 + i, r0 + (i + 1) % n, r1 + (i + 1) % n, r1 + i) for i in range(n)]
+        last = 1 + (m - 2) * n
+        faces += [(last + i, last + (i + 1) % n, top) for i in range(n)]
+        self._add(verts, faces, bone, mat, True)
+
+    def sphere(self, c, r, bone, mat=1):
+        self.ellipsoid(c, (r, r, r), bone, n=14, m=8, mat=mat)
+
+
+def _mannequin_material(name, rgba):
+    mat = bpy.data.materials.get(name) or bpy.data.materials.new(name)
+    mat.diffuse_color = rgba
+    mat.use_nodes = True
+    bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+    if bsdf:
+        bsdf.inputs["Base Color"].default_value = rgba
+        bsdf.inputs["Roughness"].default_value = 0.55
+    return mat
+
+
+def build_mannequin(arm, name=MANNEQUIN_NAME):
+    """Maillage de mannequin skinné sur un rig aux noms Mixamo (celui de MocapCam).
+    Renvoie l'objet maillage (enfant de l'armature, modificateur Armature)."""
+    bones = arm.data.bones
+
+    def B(n):
+        b = bones.get(PREFIX + n) or bones.get(n)
+        return b
+
+    def H(n):
+        return np.array(B(n).head_local, float)
+
+    def T(n):
+        return np.array(B(n).tail_local, float)
+
+    def has(*ns):
+        return all(B(n) is not None for n in ns)
+
+    need = ("Hips", "Spine", "Spine2", "Neck", "Head", "LeftUpLeg", "LeftLeg", "RightUpLeg", "RightLeg")
+    if not has(*need):
+        raise RuntimeError("le mannequin demande un squelette aux noms Mixamo")
+    legs = [np.linalg.norm(T(f"{s}UpLeg") - H(f"{s}UpLeg")) + np.linalg.norm(T(f"{s}Leg") - H(f"{s}Leg"))
+            for s in ("Left", "Right")]
+    s = float(np.mean(legs)) / 0.85                      # 1 pour un adulte d'environ 1,79 m
+    X, Y, Z = np.eye(3)
+    hip_w = abs(H("LeftUpLeg")[0] - H("RightUpLeg")[0])
+    sh_w = abs(T("LeftShoulder")[0] - T("RightShoulder")[0]) if has("LeftShoulder", "RightShoulder") else 0.36 * s
+    P = _Pieces()
+    bn = lambda n: B(n).name
+
+    # tronc d'un seul tenant (bassin -> épaules), tête
+    sp1 = "Spine1" if B("Spine1") else "Spine"
+    h0, top = H("Hips"), T("Spine2")
+    mid = lambda n: (H(n) + T(n)) / 2
+    hw = hip_w / 2
+    shw = max(0.15 * s, sh_w / 2 - 0.005 * s)
+    fw = -Y * 0.008 * s                                   # poitrine un peu en avant
+    rings = [(h0 - Z * 0.105 * s, hw + 0.01 * s, 0.075 * s, "Hips"),
+             (h0 - Z * 0.06 * s, hw + 0.06 * s, 0.098 * s, "Hips"),
+             (h0 + Z * 0.0, hw + 0.075 * s, 0.105 * s, "Hips"),
+             (T("Hips") + Z * 0.01 * s, hw + 0.06 * s, 0.1 * s, "Hips"),
+             (mid("Spine"), 0.132 * s, 0.093 * s, "Spine"),
+             (H(sp1), 0.138 * s, 0.096 * s, sp1),
+             (mid(sp1) + fw, 0.148 * s, 0.104 * s, sp1),
+             (H("Spine2") + fw, 0.158 * s, 0.11 * s, "Spine2"),
+             (mid("Spine2") + fw, 0.5 * (0.158 * s + shw), 0.112 * s, "Spine2"),
+             (top - Z * 0.025 * s + fw * 0.5, shw, 0.1 * s, "Spine2"),
+             (top + Z * 0.01 * s, shw * 0.8, 0.082 * s, "Spine2"),
+             (top + Z * 0.035 * s, 0.07 * s, 0.058 * s, "Spine2")]
+    P.loft([(c, rx, ry, bn(b)) for c, rx, ry, b in rings])
+    P.tube(H("Neck"), T("Neck") + Z * 0.02 * s, 0.05 * s, 0.046 * s, bn("Neck"))
+    P.ellipsoid(H("Head") + Z * 0.1 * s - Y * 0.012 * s, (0.082 * s, 0.098 * s, 0.115 * s), bn("Head"))
+
+    for side in ("Left", "Right"):
+        # bras
+        if has(f"{side}Shoulder"):
+            P.tube(H(f"{side}Shoulder"), T(f"{side}Shoulder"), 0.05 * s, 0.056 * s, bn(f"{side}Shoulder"), side=Y)
+        if has(f"{side}Arm", f"{side}ForeArm"):
+            P.sphere(H(f"{side}Arm"), 0.064 * s, bn(f"{side}Arm"))
+            P.tube(H(f"{side}Arm"), T(f"{side}Arm"), 0.052 * s, 0.041 * s, bn(f"{side}Arm"))
+            P.sphere(H(f"{side}ForeArm"), 0.047 * s, bn(f"{side}ForeArm"))
+            P.tube(H(f"{side}ForeArm"), T(f"{side}ForeArm"), 0.04 * s, 0.03 * s, bn(f"{side}ForeArm"))
+        if has(f"{side}Hand"):
+            hb = f"{side}Hand"
+            P.sphere(H(hb), 0.035 * s, bn(hb))
+            bases = [H(f"{side}Hand{f}1") for f in ("Index", "Middle", "Ring", "Pinky") if has(f"{side}Hand{f}1")]
+            tip = np.mean(bases, axis=0) if bases else T(hb)
+            width = (H(f"{side}HandIndex1") - H(f"{side}HandPinky1")) if has(f"{side}HandIndex1", f"{side}HandPinky1") else Y
+            P.tube(H(hb), tip, 0.036 * s, 0.043 * s, bn(hb), side=width, flat=0.38)
+            for f in FINGERS:
+                r = 0.0135 * s if f == "Thumb" else 0.0105 * s
+                for k in (1, 2, 3):
+                    n = f"{side}Hand{f}{k}"
+                    if not has(n):
+                        continue
+                    P.sphere(H(n), r * 1.12, bn(n))
+                    P.tube(H(n), T(n), r, r * 0.88, bn(n), n=10)
+        # jambes
+        P.tube(H(f"{side}UpLeg"), T(f"{side}UpLeg"), 0.082 * s, 0.058 * s, bn(f"{side}UpLeg"))
+        P.sphere(H(f"{side}Leg"), 0.066 * s, bn(f"{side}Leg"))
+        P.tube(H(f"{side}Leg"), T(f"{side}Leg"), 0.055 * s, 0.04 * s, bn(f"{side}Leg"))
+        if has(f"{side}Foot"):
+            fb = f"{side}Foot"
+            P.sphere(H(fb), 0.048 * s, bn(fb))
+            ball = T(fb).copy()
+            fwd = ball - H(fb)
+            fwd[2] = 0
+            fwd = nrm(fwd) if np.linalg.norm(fwd) > 1e-6 else -Y
+            heel = H(fb) - fwd * 0.05 * s
+            heel[2] = 0.036 * s
+            ball[2] = max(ball[2], 0.032 * s)
+            P.tube(heel, ball, 0.042 * s, 0.046 * s, bn(fb), side=X, flat=0.75)
+            if has(f"{side}ToeBase"):
+                toe = T(f"{side}ToeBase").copy()
+                toe[2] = max(toe[2], 0.024 * s)
+                P.tube(ball, toe, 0.044 * s, 0.034 * s, bn(f"{side}ToeBase"), side=X, flat=0.62)
+
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(P.v, [], P.f)
+    me.update()
+    import bmesh
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(me)
+    bm.free()
+    me.polygons.foreach_set("material_index", P.mat)
+    me.polygons.foreach_set("use_smooth", P.smooth)
+    me.materials.append(_mannequin_material("MocapCam_Corps", BODY_RGBA))
+    me.materials.append(_mannequin_material("MocapCam_Articulations", JOINT_RGBA))
+    me.update()
+    ob = bpy.data.objects.new(name, me)
+    for coll in arm.users_collection:
+        coll.objects.link(ob)
+    ob.parent = arm
+    ob.matrix_parent_inverse = Matrix.Identity(4)
+    ob.matrix_basis = Matrix.Identity(4)
+    for bone_name, idx in P.groups.items():
+        ob.vertex_groups.new(name=bone_name).add(idx, 1.0, "REPLACE")
+    mod = ob.modifiers.new("Armature", "ARMATURE")
+    mod.object = arm
+    return ob
+
+
+def _neutral_joints():
+    """Trajectoires vides : le rig prend les proportions par défaut (adulte d'environ 1,79 m)."""
+    names = ["nose", "l_eye", "r_eye", "l_ear", "r_ear", "l_shoulder", "r_shoulder", "l_elbow", "r_elbow",
+             "l_wrist", "r_wrist", "l_hip", "r_hip", "l_knee", "r_knee", "l_ankle", "r_ankle",
+             "l_big_toe", "l_small_toe", "l_heel", "r_big_toe", "r_small_toe", "r_heel"]
+    names += [f"{h}_{i}" for h in ("lh", "rh") for i in range(21)]
+    return {n: np.full((1, 3), np.nan) for n in names}
+
+
+def mannequin_file(glb_path):
+    """GLB du rig Mixamo par défaut avec son mannequin, en T-pose (vignette de MocapCam Studio)."""
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    arm = create_mixamo_armature(bpy.context, _neutral_joints(), name="Armature")
+    ob = build_mannequin(arm)
+    export_glb(bpy.context, [arm, ob], glb_path, animated=False)
+    return dict(vertices=len(ob.data.vertices), groups=len(ob.vertex_groups), bones=len(arm.data.bones))
+
+
 def inspect_character(path, glb_path=None):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     arm, meshes = load_character(bpy.context, path)
@@ -1245,7 +1503,9 @@ def retarget_file(anim_path, char_path, out_fbx, root_mode="RELATIVE", glb_path=
 
 def main_cli():
     """blender -b --factory-startup --python <ce fichier> -- …
-      capture.mocap.json sortie.fbx [RELATIVE|ABSOLUTE]          capture -> squelette Mixamo animé
+      capture.mocap.json sortie.fbx [RELATIVE|ABSOLUTE] [apercu.glb]   capture -> rig Mixamo animé
+      rig capture.mocap.json apercu.glb [RELATIVE|ABSOLUTE]    aperçu seul (rig + mannequin)
+      mannequin sortie.glb                                       rig Mixamo par défaut, T-pose
       retarget anim.fbx personnage.fbx sortie.fbx [RELATIVE|ABSOLUTE] [apercu.glb]
       inspect personnage.fbx [apercu.glb]"""
     import sys
@@ -1261,10 +1521,19 @@ def main_cli():
         info = inspect_character(argv[1], argv[2] if len(argv) > 2 else None)
         print(f"MOCAPCAM_INSPECT_OK {json.dumps(info)}")
         return
+    if argv and argv[0] == "rig":
+        rep = capture_to_fbx(argv[1], None, argv[3] if len(argv) > 3 else "RELATIVE", glb_path=argv[2])
+        print(f"MOCAPCAM_RIG_OK {json.dumps(rep, default=str)}")
+        return
+    if argv and argv[0] == "mannequin":
+        rep = mannequin_file(argv[1])
+        print(f"MOCAPCAM_MANNEQUIN_OK {json.dumps(rep)}")
+        return
     if len(argv) < 2:
-        raise SystemExit("usage : -- capture.mocap.json sortie.fbx [RELATIVE|ABSOLUTE]")
-    rep = capture_to_fbx(argv[0], argv[1], argv[2] if len(argv) > 2 else "RELATIVE")
-    print(f"MOCAPCAM_FBX_OK {json.dumps(rep)}")
+        raise SystemExit("usage : -- capture.mocap.json sortie.fbx [RELATIVE|ABSOLUTE] [apercu.glb]")
+    rep = capture_to_fbx(argv[0], argv[1], argv[2] if len(argv) > 2 else "RELATIVE",
+                         glb_path=argv[3] if len(argv) > 3 else None)
+    print(f"MOCAPCAM_FBX_OK {json.dumps(rep, default=str)}")
 
 
 # --------------------------------------------------------------------------- interface

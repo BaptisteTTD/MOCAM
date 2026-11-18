@@ -190,10 +190,12 @@ réglages (cadence, réseau, dossiers).
 
 **Traiter** (onglet **Prises**) : choisissez la prise, puis **Traiter la prise**. Les 6 étapes
 s'affichent avec leur avancement ; plusieurs prises peuvent attendre leur tour. Le résultat :
-* **`captures\prise_XXX\prise_XXX.fbx`** : l'animation sur un squelette Mixamo (section 8),
-  à la taille indiquée ;
-* un **aperçu 3D** dans Studio (squelette ou personnage, lecture, image par image) ;
-* si un personnage par défaut est choisi, **`prise_XXX_<personnage>.fbx`**, votre personnage animé.
+* **`captures\prise_XXX\prise_XXX.fbx`** : toujours, l'animation sur un **rig Mixamo** (65 os,
+  sans maillage, section 8), à la taille indiquée. C'est la sortie par défaut, sans aucun
+  fichier de personnage à fournir ;
+* un **aperçu 3D** dans Studio : ce rig Mixamo habillé d'un mannequin gris aux articulations
+  bleues, ou votre personnage ; lecture et image par image ;
+* si vous avez choisi un de vos personnages, **`prise_XXX_<personnage>.fbx`** : il est animé en plus.
 
 La taille de l'acteur peut être corrigée après coup dans le panneau de la prise
 (*Taille de l'acteur*, puis **Appliquer**) : c'est immédiat, sans retraiter, et le FBX est refait.
@@ -202,6 +204,9 @@ contrôles), inutiles pour l'utilisation.
 
 ### Animer votre propre personnage
 
+Sans rien importer, tout sort sur le **rig Mixamo** fourni (première carte de l'onglet
+*Personnages*, « Sortie par défaut »). Pour animer en plus votre propre modèle :
+
 Onglet **Personnages** : glissez le fichier de votre personnage riggé (**FBX, GLB/glTF, .blend**,
 ou un **.zip** avec ses textures), donnez-lui un nom. Studio l'analyse avec Blender et affiche
 sa vignette, son nombre d'os et le type de squelette reconnu : **Mixamo, Unreal (UE4/UE5),
@@ -209,7 +214,8 @@ Character Creator, Biped 3ds Max, VRoid, DAZ, Rigify**, ou des noms usuels (`upp
 `LeftForeArm`, `Hand.R`…). Les doigts sont animés s'il en a.
 
 * Bouton **Animer après chaque traitement** : ce personnage est animé automatiquement à la fin
-  de chaque traitement.
+  de chaque traitement (en plus du rig Mixamo). *Utiliser seul*, sur la carte Rig Mixamo, revient
+  à la sortie par défaut.
 * Pour une prise déjà traitée : onglet *Prises*, liste *Animer un personnage*, choisissez-le puis
   **Animer**. L'aperçu 3D peut alors montrer le personnage au lieu du squelette.
 * Le résultat garde le maillage, les matériaux et la pose de repos du personnage ; seule son
@@ -342,6 +348,7 @@ dans `3dsmax\test\resultat.txt`.
 | « taille peu plausible » ou personnage trop grand / trop petit | Indiquez la taille de l'acteur en cm : onglet *Prises*, *Taille de l'acteur*, **Appliquer** (immédiat, sans retraiter). |
 | Erreur de calibration > 4 px | Normal avant l'affinage par le corps si les boules sont un peu mal placées. Au-delà de 10 px : une boule mal mesurée, ou une tache de même couleur confondue avec une boule. |
 | « Format d'image différent » | Seulement avec le damier optionnel : il a été filmé dans une autre orientation ou une autre résolution. |
+| Studio s'ouvre vide, sans QR code, ou affiche « MocapCam Studio doit être relancé » | Un ancien Studio tournait encore. Relancez `MocapCam Studio.bat` : il ferme l'ancien tout seul et prend sa place (fermez ensuite l'ancienne fenêtre noire). |
 | Le téléphone ne trouve pas le PC | Même réseau (pas un Wi-Fi « invité ») ; sur un partage de connexion ou un réseau « public », cliquez **Autoriser MocapCam** dans Studio ; si le PC a changé de réseau, rescannez le QR code (l'ancien contient les anciennes adresses). |
 | Personnage refusé ou mal animé | Studio indique les os qu'il n'a pas reconnus. Il faut un squelette humanoïde (bassin, colonne, cou, tête, bras, jambes) ; renommer les os à la Mixamo (`LeftArm`, `LeftForeArm`…) marche toujours. Blender doit être installé. |
 | Signal sonore « peu audible » | Montez le volume du PC. Sinon, la synchro se fait par les horloges, à environ une image près. |
