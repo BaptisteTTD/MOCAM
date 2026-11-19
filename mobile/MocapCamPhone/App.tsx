@@ -46,7 +46,7 @@ import {
   type Settings,
 } from './src/settings'
 
-const APP_VERSION = '1.2.0'
+const APP_VERSION = '1.2.1'
 
 // Erreurs hors affichage (minuteries, callbacks natifs) : on les montre à l'écran
 // au lieu de laisser l'app se fermer.

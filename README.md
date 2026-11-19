@@ -1,9 +1,4 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/logo-mocam-blanc.png">
-    <img src="docs/logo-mocam-sombre.png" alt="MOCAM" width="260">
-  </picture>
-</p>
+<p align="center"><img src="docs/logo-mocam.png" alt="MOCAM" width="420"></p>
 
 <p align="center"><b>La motion capture avec deux téléphones ou plus.</b><br>
 Corps et doigts, sans marqueurs sur l'acteur, jusqu'à votre personnage 3D.</p>
