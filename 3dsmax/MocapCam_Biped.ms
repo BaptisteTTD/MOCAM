@@ -17,7 +17,7 @@
     Biped prend la direction de l'os correspondant, et sa torsion est reprise
     de l'animation. Le déplacement est mis à l'échelle de ses jambes.
 
-    Un projet MOCAM — https://github.com/BaptisteTTD/MocapCam
+    Un projet MOCAM — https://github.com/BaptisteTTD/MOCAM
 */
 
 (
