@@ -217,6 +217,8 @@ pouvez filmer d'autres prises pendant ce temps : elles attendent leur tour.
 * **Fichiers** : les FBX produits, et **Ouvrir le dossier** pour les récupérer
   (`captures\nom_de_la_prise\`).
 * **Animer un personnage** : appliquer la prise à un autre de vos personnages.
+* **Supprimer la prise** (en haut à droite) : son dossier part à la corbeille de Windows, vous
+  pouvez le récupérer.
 
 ### Étape 8 : utiliser votre propre personnage
 

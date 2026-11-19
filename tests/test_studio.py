@@ -327,6 +327,27 @@ async def main():
                 ok("bouton Traiter + étapes + journal en direct", "1/6" in txt and "3/6" in txt and 3 in steps_seen,
                    f"étapes vues {sorted(steps_seen)} ; " +
                    " / ".join(l for l in txt.splitlines() if l.strip().startswith(("1/6", "2/6", "3/6", "4/6")))[:300])
+                # « Ouvrir le dossier » ne coupe pas la connexion ; suppression d'une prise
+                await page.locator("button", has_text="Ouvrir le dossier").click()
+                await page.wait_for_timeout(1500)
+                disc = await page.locator("#disc").is_visible()
+                dd = os.path.join(CAPT, "a_supprimer")
+                os.makedirs(dd, exist_ok=True)
+                with open(os.path.join(dd, "take.json"), "w") as f:
+                    json.dump({"take": "a_supprimer"}, f)
+                await page.evaluate("send({a:'open'})")      # provoque un nouvel état
+                await page.wait_for_timeout(1500)
+                await page.evaluate("selectTake('a_supprimer')")
+                await page.wait_for_timeout(500)
+                page.once("dialog", lambda dlg: asyncio.ensure_future(dlg.accept()))
+                await page.locator("button", has_text="Supprimer la prise").click()
+                for _ in range(20):
+                    await page.wait_for_timeout(300)
+                    if not os.path.isdir(dd):
+                        break
+                listed = any(t["name"] == "a_supprimer" for t in (await ui_state(session))["takes"])
+                ok("ouvrir le dossier puis supprimer une prise", not disc and not os.path.isdir(dd) and not listed,
+                   f"connexion {'perdue' if disc else 'gardée'}, dossier {'encore là' if os.path.isdir(dd) else 'supprimé'}")
                 shot3 = os.path.join(D, "studio_fin.png")
                 await page.screenshot(path=shot3)
                 SHOTS.append(shot3)

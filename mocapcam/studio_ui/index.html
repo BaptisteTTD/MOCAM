@@ -49,6 +49,8 @@
   .btn.primary { background: var(--act); border-color: var(--act); color: #fff; font-weight: 600; }
   .btn.primary:hover:not(:disabled) { background: #5d8bf7; }
   .btn.danger { color: #ff8c86; }
+  .take-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .icon-btn { display: inline-flex; align-items: center; gap: 6px; flex: none; }
   .btn.small { padding: 4px 10px; font-size: 13px; }
   .field { display: flex; flex-direction: column; gap: 5px; }
   .field > span { color: var(--muted); font-size: 13px; }
@@ -307,7 +309,7 @@
 <script>
 let ws, S = null, serverDelta = 0, takeTyped = false, selTake = null, logText = '';
 const autoAnimated = new Set();   // prises où le personnage par défaut a été lancé automatiquement
-const UI_VERSION = '1.4.1';   // doit correspondre à STUDIO_VERSION (studio_server.py)
+const UI_VERSION = '1.4.2';   // doit correspondre à STUDIO_VERSION (studio_server.py)
 function newerVersion(a, b) {
   const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
   for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
@@ -579,6 +581,11 @@ function renderTakesList() {
     </div>`).join('') : '<div class="empty-page">Aucune prise pour l\'instant.<br>Filmez-en une depuis l\'onglet Tournage.</div>';
 }
 function selectTake(n) { selTake = n; renderTakesList(); renderTakeDetail(true); }
+function deleteTake(n) {
+  if (!confirm(`Supprimer la prise ${n} ?\n\nSon dossier (vidéos et FBX) part à la corbeille de Windows : vous pourrez le récupérer.`)) return;
+  send({ a: 'take_delete', take: n });
+}
+window.deleteTake = deleteTake;
 window.selectTake = selectTake;
 
 let detailKey = '', viewerSel = null;
@@ -613,9 +620,15 @@ function renderTakeDetail(force) {
   const stepsHtml = running && P.kind === 'traiter' ? `<div class="steps">${STEPS.map((s, i) => `<div class="step ${i + 1 < P.step ? 'done' : i + 1 === P.step ? 'cur' : ''}"><span class="n">${i + 1}</span><span>${s}</span></div>`).join('')}</div>` : '';
   const hVal = t.height_cm ?? '';
   box.innerHTML = `
-    <div>
-      <h1>${esc(t.name)}</h1>
-      <div class="sub">${t.created ? esc(t.created) : ''}${t.duration ? ' — ' + fr(t.duration) + ' s' : ''} — ${t.videos.map(esc).join(', ') || 'aucune vidéo'}</div>
+    <div class="take-head">
+      <div>
+        <h1>${esc(t.name)}</h1>
+        <div class="sub">${t.created ? esc(t.created) : ''}${t.duration ? ' — ' + fr(t.duration) + ' s' : ''} — ${t.videos.map(esc).join(', ') || 'aucune vidéo'}</div>
+      </div>
+      <button class="btn small danger icon-btn" title="Supprimer la prise" ${running ? 'disabled' : ''} onclick="deleteTake('${esc(t.name)}')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg>
+        Supprimer la prise
+      </button>
     </div>
     <div class="grid2">
       <div class="panel">

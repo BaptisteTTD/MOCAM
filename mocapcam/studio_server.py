@@ -35,7 +35,7 @@ from . import fbx, markers as mk, pipeline, sync
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "studio_ui")
 # version du serveur : l'interface (index.html) vérifie qu'elle parle au serveur de la même version
-STUDIO_VERSION = "1.4.1"
+STUDIO_VERSION = "1.4.2"
 
 # horloge du PC en ms (monotone, calée sur l'heure système au démarrage)
 _EPOCH = time.time() * 1000 - time.monotonic() * 1000
@@ -953,6 +953,32 @@ class Studio:
             raise web.HTTPNotFound()
         return web.FileResponse(p, headers={"Cache-Control": "no-store"})
 
+    def open_folder(self, take=None, path=None):
+        d = path or (os.path.join(self.captures_dir, safe_name(take)) if take else self.captures_dir)
+        if not os.path.isdir(d):
+            return
+        if hasattr(os, "startfile"):
+            os.startfile(d)  # noqa: S606 (Windows)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", d])
+        elif shutil.which("xdg-open"):
+            subprocess.Popen(["xdg-open", d], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def delete_take(self, take):
+        """Supprime le dossier d'une prise : corbeille de Windows (récupérable), sinon suppression."""
+        d = os.path.join(self.captures_dir, take)
+        if sys.platform.startswith("win"):
+            ps = ("Add-Type -AssemblyName Microsoft.VisualBasic; "
+                  "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($env:MOCAM_DEL, "
+                  "'OnlyErrorDialogs', 'SendToRecycleBin')")
+            subprocess.run(["powershell", "-NoProfile", "-Command", ps], env=dict(os.environ, MOCAM_DEL=d),
+                           capture_output=True, timeout=120, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if os.path.isdir(d):
+                raise OSError("la corbeille a refusé le dossier (un fichier est peut-être ouvert)")
+            return "corbeille"
+        shutil.rmtree(d)
+        return "supprimée"
+
     async def handle_ui(self, request):
         ws = web.WebSocketResponse(heartbeat=20)
         await ws.prepare(request)
@@ -966,7 +992,11 @@ class Studio:
                     m = json.loads(msg.data)
                 except ValueError:
                     continue
-                await self.on_ui(m)
+                try:
+                    await self.on_ui(m)
+                except Exception as e:  # noqa: BLE001  une action ratée ne coupe pas la connexion
+                    print(f"  action {m.get('a')} : {e!r}")
+                    await self.toast(f"Action impossible : {e}", "error")
         finally:
             self.uis.discard(ws)
         return ws
@@ -1026,6 +1056,20 @@ class Studio:
             self.changed()
         elif a == "open":
             self.open_folder(m.get("take"))
+        elif a == "take_delete":
+            take = safe_name(m.get("take", ""))
+            d = os.path.join(self.captures_dir, take)
+            busy = (self.proc and self.proc.get("running") and self.proc.get("take") == take) \
+                or (self.take and self.take.get("name") == take and self.take.get("state") in ("starting", "recording", "stopping"))
+            if not take or not os.path.isdir(d):
+                return
+            if busy:
+                await self.toast(f"{take} est en cours d'enregistrement ou de traitement : attendez la fin", "warn")
+                return
+            self.queue = [j for j in self.queue if j["take"] != take]
+            how = await asyncio.get_running_loop().run_in_executor(None, self.delete_take, take)
+            self.changed()
+            await self.toast(f"Prise {take} " + ("mise à la corbeille" if how == "corbeille" else "supprimée"), "ok")
         elif a == "open_characters":
             os.makedirs(pipeline.characters_dir(self.studio_dir), exist_ok=True)
             self.open_folder(path=pipeline.characters_dir(self.studio_dir))
