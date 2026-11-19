@@ -1,7 +1,7 @@
 bl_info = {
     "name": "MOCAM",
     "author": "MOCAM",
-    "version": (0, 4, 1),
+    "version": (0, 5, 0),
     "blender": (3, 6, 0),
     "location": "Vue 3D > barre latérale (N) > MOCAM  |  Fichier > Importer > Animation MOCAM (.fbx)",
     "description": "Importe une animation MOCAM (FBX, squelette Mixamo) et la transfère (retarget) "
@@ -1197,7 +1197,8 @@ def character_info(arm, meshes):
         zs = [(arm.matrix_world @ b.head_local).z for b in arm.data.bones]
     return dict(armature=arm.name, kind=rig_kind(arm), bones=len(arm.data.bones), mapped=len(m),
                 fingers=sum(1 for k in m if "Hand" in k and k[-1].isdigit()), meshes=len(meshes),
-                triangles=tris, height=round(max(zs) - min(zs), 3) if zs else None)
+                triangles=tris, height=round(max(zs) - min(zs), 3) if zs else None,
+                arkit=len(face_shapes(meshes)))
 
 
 def export_glb(context, objs, filepath, animated=True):
@@ -1470,10 +1471,22 @@ def mannequin_file(glb_path):
 
 def inspect_character(path, glb_path=None):
     bpy.ops.wm.read_factory_settings(use_empty=True)
-    arm, meshes = load_character(bpy.context, path)
-    info = character_info(arm, meshes)
+    try:
+        arm, meshes = load_character(bpy.context, path)
+        info = character_info(arm, meshes)
+        objs = [arm] + meshes
+    except RuntimeError as err:
+        # tête seule à blendshapes ARKit (sans squelette humanoïde) : utilisable pour le visage
+        arm, meshes = _load_any(bpy.context, path)
+        n = len(face_shapes(meshes))
+        if not n:
+            raise err
+        tris = sum(len(p.vertices) - 2 for o in meshes for p in o.data.polygons)
+        info = dict(armature=arm.name if arm else None, kind="Visage seul", bones=len(arm.data.bones) if arm else 0,
+                    mapped=0, fingers=0, meshes=len(meshes), triangles=tris, height=None, arkit=n, face_only=True)
+        objs = ([arm] if arm else []) + meshes
     if glb_path:
-        export_glb(bpy.context, [arm] + meshes, glb_path, animated=False)
+        export_glb(bpy.context, objs, glb_path, animated=False)
     return info
 
 
@@ -1501,6 +1514,229 @@ def retarget_file(anim_path, char_path, out_fbx, root_mode="RELATIVE", glb_path=
     return rep
 
 
+# --------------------------------------------------------------------------- capture faciale
+# Visage MOCAM : maillage appris sur la prise (468 sommets) avec les 52 blendshapes ARKit,
+# posé sur un os de tête ; ou transfert des courbes sur les blendshapes d'un personnage.
+
+ARKIT = ["eyeBlinkLeft", "eyeLookDownLeft", "eyeLookInLeft", "eyeLookOutLeft", "eyeLookUpLeft",
+         "eyeSquintLeft", "eyeWideLeft", "eyeBlinkRight", "eyeLookDownRight", "eyeLookInRight",
+         "eyeLookOutRight", "eyeLookUpRight", "eyeSquintRight", "eyeWideRight", "jawForward",
+         "jawRight", "jawLeft", "jawOpen", "mouthClose", "mouthFunnel", "mouthPucker", "mouthRight",
+         "mouthLeft", "mouthSmileLeft", "mouthSmileRight", "mouthFrownLeft", "mouthFrownRight",
+         "mouthDimpleLeft", "mouthDimpleRight", "mouthStretchLeft", "mouthStretchRight",
+         "mouthRollLower", "mouthRollUpper", "mouthShrugLower", "mouthShrugUpper", "mouthPressLeft",
+         "mouthPressRight", "mouthLowerDownLeft", "mouthLowerDownRight", "mouthUpperUpLeft",
+         "mouthUpperUpRight", "browDownLeft", "browDownRight", "browInnerUp", "browOuterUpLeft",
+         "browOuterUpRight", "cheekPuff", "cheekSquintLeft", "cheekSquintRight", "noseSneerLeft",
+         "noseSneerRight", "tongueOut"]
+
+
+def arkit_key(name):
+    """Nom de blendshape -> nom ARKit normalisé, ou None. Accepte « eyeBlinkLeft », « EyeBlink_L »,
+    « A01_Brow_Inner_Up », « blendShape1.jawOpen », « eye_blink_left »…"""
+    import re as _re
+    n = name.split(".")[-1].split(":")[-1]
+    n = _re.sub(r"^[A-Za-z]\d\d_", "", n)
+    n = _re.sub(r"(?:[\s_\-](?:L|l)|[\s_\-]?(?:Left|left))$", "Left", n)
+    n = _re.sub(r"(?:[\s_\-](?:R|r)|[\s_\-]?(?:Right|right))$", "Right", n)
+    k = _re.sub(r"[^a-z]", "", n.lower())
+    return _ARKIT_NORM.get(k)
+
+
+_ARKIT_NORM = {n.lower(): n for n in ARKIT}
+
+
+def _face_curves(path):
+    with open(path, encoding="utf-8") as f:
+        d = json.load(f)
+    return d, np.array(d["weights"], float), np.array(d["head"], float)
+
+
+def _head_quat(deg):
+    """Rotation de la tête (lacet, tangage, roulis en degrés, repère caméra) -> quaternion
+    dans le repère Blender d'un personnage qui regarde vers -Y."""
+    from mathutils import Euler
+    yaw, pitch, roll = [math.radians(v) for v in deg]
+    # caméra : x -> +X, y (haut) -> +Z, z (vers la caméra) -> -Y
+    return Euler((pitch, roll, yaw), "YXZ").to_quaternion()
+
+
+def _key_face(key_blocks_by_arkit, W, start=0):
+    n = 0
+    for name, blocks in key_blocks_by_arkit.items():
+        j = ARKIT.index(name)
+        for kb in blocks:
+            kb.value = 0.0
+            for i in range(len(W)):
+                kb.value = float(W[i, j])
+                kb.keyframe_insert("value", frame=start + i)
+            n += 1
+    return n
+
+
+def face_file(json_path, fbx_path, glb_path=None):
+    """Visage MOCAM animé : maillage + 52 blendshapes ARKit + os « Head », en FBX (et GLB)."""
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    context = bpy.context
+    d, W, H = _face_curves(json_path)
+    fps = float(d["fps"])
+    sc = context.scene
+    set_scene_fps(sc, fps)
+    sc.frame_start, sc.frame_end = 0, len(W) - 1
+    take = os.path.splitext(os.path.basename(json_path))[0]
+    sc.name = take
+    face = d["face"]
+    V = np.array(face["vertices"], float)
+    D = np.array(face["deltas"], float)
+    # armature : un os de tête sous le menton
+    arm_data = bpy.data.armatures.new("MOCAM_Tete")
+    arm = bpy.data.objects.new("MOCAM_Tete", arm_data)
+    sc.collection.objects.link(arm)
+    context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode="EDIT")
+    eb = arm_data.edit_bones.new("Head")
+    eb.head = (0.0, 0.09, -0.03)       # pivot sous le crâne, derrière le visage
+    eb.tail = (0.0, 0.09, 0.18)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    me = bpy.data.meshes.new("MOCAM_Visage")
+    me.from_pydata([tuple(v) for v in V], [], [tuple(t) for t in face["triangles"]])
+    me.update()
+    import bmesh
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(me)
+    bm.free()
+    me.polygons.foreach_set("use_smooth", [True] * len(me.polygons))
+    mat = bpy.data.materials.new("MOCAM_Peau")
+    mat.diffuse_color = (0.78, 0.66, 0.6, 1)
+    mat.use_nodes = True
+    bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+    if bsdf:
+        bsdf.inputs["Base Color"].default_value = (0.78, 0.66, 0.6, 1)
+        bsdf.inputs["Roughness"].default_value = 0.6
+    me.materials.append(mat)
+    ob = bpy.data.objects.new("MOCAM_Visage", me)
+    sc.collection.objects.link(ob)
+    ob.parent = arm
+    ob.vertex_groups.new(name="Head").add(list(range(len(V))), 1.0, "REPLACE")
+    ob.modifiers.new("Armature", "ARMATURE").object = arm
+    ob.shape_key_add(name="Basis", from_mix=False)
+    blocks = {}
+    for j, name in enumerate(ARKIT):
+        kb = ob.shape_key_add(name=name, from_mix=False)
+        kb.data.foreach_set("co", (V + D[j]).ravel().tolist())
+        kb.slider_min, kb.slider_max = 0.0, 1.0
+        blocks[name] = [kb]
+    n_keys = _key_face(blocks, W)
+    if me.shape_keys.animation_data and me.shape_keys.animation_data.action:
+        me.shape_keys.animation_data.action.name = take + "_visage"
+    pb = arm.pose.bones["Head"]
+    pb.rotation_mode = "QUATERNION"
+    for i in range(len(H)):
+        pb.rotation_quaternion = _head_quat(H[i])
+        pb.keyframe_insert("rotation_quaternion", frame=i)
+    if arm.animation_data and arm.animation_data.action:
+        arm.animation_data.action.name = take
+    arm[FPS_PROP] = fps
+    export_fbx(context, arm, fbx_path, rest_frame=False, meshes=[ob])
+    if glb_path:
+        os.makedirs(os.path.dirname(glb_path), exist_ok=True)
+        export_glb(context, [arm, ob], glb_path, animated=True)
+    return dict(frames=len(W), fps=fps, shapes=n_keys, vertices=len(V))
+
+
+def _load_any(context, path):
+    """Importe un fichier de personnage, avec ou sans squelette. Renvoie (armature|None, maillages)."""
+    try:
+        return load_character(context, path)
+    except RuntimeError:
+        pass
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".fbx":
+        bpy.ops.import_scene.fbx(filepath=path, use_anim=False)
+    elif ext in (".glb", ".gltf"):
+        bpy.ops.import_scene.gltf(filepath=path)
+    elif ext == ".blend":
+        with bpy.data.libraries.load(path, link=False) as (src, dst):
+            dst.objects = list(src.objects)
+        for o in dst.objects:
+            if o is not None:
+                context.scene.collection.objects.link(o)
+    arms = [o for o in bpy.data.objects if o.type == "ARMATURE"]
+    return (arms[0] if arms else None), [o for o in bpy.data.objects if o.type == "MESH"]
+
+
+def face_shapes(meshes):
+    """Blendshapes ARKit trouvées sur les maillages : {nom ARKit: [key blocks]}."""
+    found = {}
+    for o in meshes:
+        keys = o.data.shape_keys
+        if not keys:
+            continue
+        for kb in keys.key_blocks[1:]:
+            k = arkit_key(kb.name)
+            if k:
+                found.setdefault(k, []).append(kb)
+    return found
+
+
+def face_character_file(json_path, char_path, out_fbx, glb_path=None):
+    """Courbes de visage -> blendshapes ARKit du personnage (+ rotation de son os de tête)."""
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    context = bpy.context
+    arm, meshes = _load_any(context, char_path)
+    found = face_shapes(meshes)
+    if not found:
+        raise RuntimeError("Ce personnage n'a pas de blendshapes ARKit (eyeBlinkLeft, jawOpen…)")
+    d, W, H = _face_curves(json_path)
+    fps = float(d["fps"])
+    sc = context.scene
+    set_scene_fps(sc, fps)
+    sc.frame_start, sc.frame_end = 0, len(W) - 1
+    take = os.path.splitext(os.path.basename(json_path))[0]
+    n = _key_face(found, W)
+    head = False
+    if arm is not None:
+        try:
+            bmap = bone_map(arm)
+        except RuntimeError:
+            bmap = {}
+        hb = bmap.get("Head") or next((b.name for b in arm.data.bones
+                                       if b.name.lower().split(":")[-1].split("_")[-1] == "head"), None)
+        if hb:
+            pb = arm.pose.bones[hb]
+            rest = arm.data.bones[hb].matrix_local.to_quaternion()
+            pb.rotation_mode = "QUATERNION"
+            for i in range(len(H)):
+                q = _head_quat(H[i])
+                pb.rotation_quaternion = rest.inverted() @ q @ rest
+                pb.keyframe_insert("rotation_quaternion", frame=i)
+            head = True
+        arm[FPS_PROP] = fps
+        if arm.animation_data and arm.animation_data.action:
+            arm.animation_data.action.name = take
+        export_fbx(context, arm, out_fbx, rest_frame=False, meshes=meshes)
+        objs = [arm] + meshes
+    else:
+        for o in context.view_layer.objects:
+            o.select_set(False)
+        for o in meshes:
+            o.select_set(True)
+        context.view_layer.objects.active = meshes[0]
+        bpy.ops.export_scene.fbx(filepath=out_fbx, use_selection=True, object_types={"MESH"},
+                                 path_mode="COPY", embed_textures=True, bake_anim=True,
+                                 bake_anim_use_nla_strips=False, bake_anim_use_all_actions=False,
+                                 bake_anim_simplify_factor=0.0, axis_forward="-Z", axis_up="Y")
+        objs = meshes
+    if glb_path:
+        os.makedirs(os.path.dirname(glb_path), exist_ok=True)
+        export_glb(context, objs, glb_path, animated=True)
+    return dict(shapes=len(found), keyed=n, meshes=len({kb.id_data for v in found.values() for kb in v}),
+                head=head, missing=[k for k in ARKIT if k not in found])
+
+
 def main_cli():
     """blender -b --factory-startup --python <ce fichier> -- …
       capture.mocap.json sortie.fbx [RELATIVE|ABSOLUTE] [apercu.glb]   capture -> rig Mixamo animé
@@ -1516,6 +1752,14 @@ def main_cli():
         rep = retarget_file(argv[1], argv[2], argv[3], argv[4] if len(argv) > 4 else "RELATIVE",
                             argv[5] if len(argv) > 5 else None)
         print(f"MOCAPCAM_RETARGET_OK {json.dumps(rep, default=str)}")
+        return
+    if argv and argv[0] == "face":
+        rep = face_file(argv[1], argv[2], argv[3] if len(argv) > 3 else None)
+        print(f"MOCAPCAM_FACE_OK {json.dumps(rep)}")
+        return
+    if argv and argv[0] == "face_character":
+        rep = face_character_file(argv[1], argv[2], argv[3], argv[4] if len(argv) > 4 else None)
+        print(f"MOCAPCAM_FACECHAR_OK {json.dumps(rep)}")
         return
     if argv and argv[0] == "inspect":
         info = inspect_character(argv[1], argv[2] if len(argv) > 2 else None)

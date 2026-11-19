@@ -72,7 +72,20 @@
   .page { display: none; height: calc(100vh - 56px); }
   .page.on { display: grid; }
   #pCams { grid-template-columns: 1fr 360px; }
-  #pTakes { grid-template-columns: 340px 1fr; }
+  #pTakes, #pFace { grid-template-columns: 340px 1fr; }
+  .face-new { padding: 16px; border-bottom: 1px solid var(--line); display: grid; gap: 10px; }
+  .face-new h2 { margin: 0; font: 650 15px/1.2 var(--display); }
+  .face-new .prev { aspect-ratio: 4 / 3; background: var(--ink-0); border-radius: var(--r-view); overflow: hidden; display: grid; place-items: center; color: var(--faint); font-size: 13px; text-align: center; padding: 0; }
+  .face-new .prev img { width: 100%; height: 100%; object-fit: cover; }
+  .face-new .row2 { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .face-view { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .face-view video, .face-view .viewer { width: 100%; aspect-ratio: 3 / 4; border-radius: var(--r-view); background: #0e1116; object-fit: contain; }
+  .bars { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 3px 18px; }
+  .bars h4 { grid-column: 1 / -1; margin: 10px 0 2px; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+  .bar { display: grid; grid-template-columns: 118px 1fr; gap: 8px; align-items: center; font-size: 11.5px; color: var(--muted); }
+  .bar i { display: block; height: 7px; border-radius: 4px; background: var(--ink-3); overflow: hidden; }
+  .bar i b { display: block; height: 100%; width: 0; background: var(--act); }
+  .headvals { display: flex; gap: 18px; font-size: 12.5px; color: var(--muted); } .headvals b { color: var(--text); font-variant-numeric: tabular-nums; }
   #pChars { grid-template-columns: 1fr; overflow: auto; }
   .scroll { overflow: auto; padding: 18px; }
 
@@ -216,6 +229,7 @@
   <nav class="tabs" role="tablist">
     <button class="tab" role="tab" data-page="pCams" aria-selected="true">Tournage<span class="count" id="nCams"></span></button>
     <button class="tab" role="tab" data-page="pTakes" aria-selected="false">Prises<span class="count" id="nTakes"></span></button>
+    <button class="tab" role="tab" data-page="pFace" aria-selected="false">Visage<span class="count" id="nFaces"></span></button>
     <button class="tab" role="tab" data-page="pChars" aria-selected="false">Personnages<span class="count" id="nChars"></span></button>
   </nav>
   <span class="spacer"></span>
@@ -256,6 +270,15 @@
 </main>
 
 <!-- ======================================================== Personnages -->
+<main class="page" id="pFace">
+  <div class="takes-list">
+    <div class="face-new" id="faceNew"></div>
+    <div id="facesList"></div>
+  </div>
+  <section class="detail" id="faceDetail"></section>
+</main>
+<input type="file" id="faceFile" accept="video/*,.mp4,.mov,.m4v,.avi,.mkv,.webm" hidden>
+
 <main class="page" id="pChars">
   <div class="chars">
     <div class="drop" id="drop">
@@ -310,7 +333,7 @@
 <script>
 let ws, S = null, serverDelta = 0, takeTyped = false, selTake = null, logText = '';
 const autoAnimated = new Set();   // prises où le personnage par défaut a été lancé automatiquement
-const UI_VERSION = '1.4.3';   // doit correspondre à STUDIO_VERSION (studio_server.py)
+const UI_VERSION = '1.5.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
 function newerVersion(a, b) {
   const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
   for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
@@ -319,7 +342,7 @@ function newerVersion(a, b) {
 function fatal(title, detail) { $('fatalT').textContent = title; $('fatalD').textContent = detail; $('fatal').style.display = 'flex'; }
 // aperçu 3D : remplacé par le module three.js dès qu'il est chargé
 window.mcViewer = window.mcViewer || { show() {}, toggle() { return true; }, seek() {} };
-window.mcRerender = () => { if (S) renderTakeDetail(true); };
+window.mcRerender = () => { if (S) { renderTakeDetail(true); renderFaceDetail(true); } };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fr = (v, d = 1) => Number(v).toLocaleString('fr-FR', { maximumFractionDigits: d });
@@ -350,7 +373,7 @@ function connect() {
       catch (e) { console.error(e); fatal('Erreur d\'affichage', `${e.message}\n\nRelancez MOCAM Studio.bat. Si l'erreur revient, envoyez ce message.`); }
     }
     else if (m.type === 'preview') { const img = document.querySelector(`img[data-prev="${m.cam}"]`); if (img) img.src = `/preview/${m.cam}?t=${m.ts}`; }
-    else if (m.type === 'log') { if (m.reset) logText = ''; logText += m.line + '\n'; const l = $('log'); if (l) { l.textContent = logText; l.scrollTop = l.scrollHeight; } }
+    else if (m.type === 'log') { if (m.reset) logText = ''; logText += m.line + '\n'; for (const l of [$('log'), $('faceLog')]) if (l) { l.textContent = logText; l.scrollTop = l.scrollHeight; } }
     else if (m.type === 'toast') toast(m.msg, m.level);
     else if (m.type === 'play_chirp') playChirp();
   };
@@ -523,7 +546,7 @@ function chkRow(state, title, detail, action = '') {
   return `<div class="chk"><span class="mark ${state}"></span><div><div class="t">${title}</div>${detail ? `<div class="d">${detail}</div>` : ''}</div><div>${action}</div></div>`;
 }
 function renderShoot() {
-  const cams = S.cams, tk = S.take, st = tk ? tk.state : 'idle';
+  const cams = S.cams, tk = S.take && S.take.kind !== 'visage' ? S.take : null, st = tk ? tk.state : 'idle';
   const recording = st === 'starting' || st === 'recording';
   $('slate').classList.toggle('rec', recording);
   if (tk && ['starting', 'recording', 'stopping'].includes(st)) $('takeName').value = tk.name;
@@ -602,7 +625,7 @@ function renderTakeDetail(force) {
   const oldBox = $('viewerBox');
   if (oldBox) oldBox.remove();
   if (!t) { box.innerHTML = '<div class="empty-page">Les prises filmées apparaissent ici.</div>'; return; }
-  const chars = S.characters;
+  const chars = S.characters.filter(c => !(c.info && c.info.face_only));   // têtes seules : onglet Visage
   const animated = chars.filter(c => t.characters.includes(c.id));
   // personnage par défaut en premier
   animated.sort((a, b) => (b.id === S.character) - (a.id === S.character));
@@ -715,10 +738,10 @@ function renderChars() {
       <div class="body">
         <div class="nm">${esc(c.name)}</div>
         ${c.builtin ? '<div class="meta">Fourni avec MOCAM</div>' : ''}
-        <div class="meta">Squelette ${esc(i.kind || '?')}, ${i.mapped ?? '?'} os reconnus${i.fingers ? ', doigts' : ', sans doigts'}</div>
+        <div class="meta">${i.face_only ? 'Visage seul' : `Squelette ${esc(i.kind || '?')}, ${i.mapped ?? '?'} os reconnus${i.fingers ? ', doigts' : ', sans doigts'}`}${i.arkit ? `, ${i.arkit} blendshapes ARKit` : ''}</div>
         <div class="meta">${i.meshes ?? 0} maillage${i.meshes > 1 ? 's' : ''}${i.triangles ? `, ${i.triangles >= 10000 ? fr(i.triangles / 1000, 0) + ' k' : fr(i.triangles, 0)} triangles` : ''}${i.height ? `, ${fr(i.height * 100, 0)} cm de haut` : ''}</div>
         <div class="acts">
-          ${def ? '<span class="ok-t" style="font-size:13px">Par défaut : animé après chaque traitement</span>' : `<button class="btn small" onclick="send({a:'character_default',id:'${esc(c.id)}'})">Utiliser par défaut</button>`}
+          ${i.face_only ? `<span class="hint" style="font-size:13px">Tête seule : pour la capture du visage</span>` : def ? '<span class="ok-t" style="font-size:13px">Par défaut : animé après chaque traitement</span>' : `<button class="btn small" onclick="send({a:'character_default',id:'${esc(c.id)}'})">Utiliser par défaut</button>`}
           <span style="flex:1"></span>
           ${c.builtin ? '' : `<button class="btn small danger" onclick="if(confirm('Supprimer ${esc(c.name)} ?')) send({a:'character_delete',id:'${esc(c.id)}'})">Supprimer</button>`}
         </div>
@@ -743,11 +766,181 @@ const drop = $('drop');
 ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
 drop.addEventListener('drop', (e) => uploadChar(e.dataTransfer.files[0]));
 
+
+// ---------------------------------------------------------------- capture faciale
+const FACE_STEPS = ['Suivi du visage', 'Calibration et lissage', 'FBX du visage', 'Personnage'];
+const FACE_GROUPS = [
+  ['Yeux', n => n.startsWith('eye')], ['Sourcils, joues, nez', n => /^(brow|cheek|nose)/.test(n)],
+  ['Mâchoire', n => n.startsWith('jaw')], ['Bouche', n => n.startsWith('mouth') || n === 'tongueOut']];
+let faceSel = null, faceCam = null, faceKey = '', faceCurves = null;
+function faceStatus(f) {
+  const P = S.processing;
+  if (P && P.running && P.take === f.name) return `<span class="warn-t">${esc(P.label)}…</span>`;
+  if (S.queue.some(j => j.take === f.name)) return '<span class="hint">en attente</span>';
+  if (f.fbx) return '<span class="ok-t">FBX prêt</span>';
+  if (f.processed) return '<span class="ok-t">traité</span>';
+  return '<span class="hint">à traiter</span>';
+}
+function renderFace() {
+  const L = S.faces || [];
+  if (!faceSel || !L.some(f => f.name === faceSel)) faceSel = L.length ? L[0].name : null;
+  // nouvelle capture
+  const tk = S.take && S.take.kind === 'visage' ? S.take : null;
+  const rec = tk && ['starting', 'recording'].includes(tk.state), stopping = tk && tk.state === 'stopping';
+  if (!faceCam || !S.cams.some(c => c.id === faceCam)) faceCam = S.cams.length ? S.cams[0].id : null;
+  const cam = S.cams.find(c => c.id === faceCam);
+  const front = cam && cam.facing === 'front';
+  const key = JSON.stringify([S.cams.map(c => [c.id, c.name, c.facing, !!c.preview_ts]), faceCam, tk && tk.state, tk && tk.name]);
+  if (key !== faceKey) {
+    faceKey = key;
+    $('faceNew').innerHTML = `
+      <h2>Nouvelle capture du visage</h2>
+      ${S.cams.length ? `
+        <div class="row2"><select class="input" style="flex:1" onchange="faceCam=this.value; faceKey=''; renderFace()" ${rec || stopping ? 'disabled' : ''}>
+          ${S.cams.map(c => `<option value="${esc(c.id)}" ${c.id === faceCam ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+          <span class="seg"><button aria-pressed="${!!front}" onclick="send({a:'face_facing',cam:'${esc(faceCam)}',facing:'front'})" ${rec ? 'disabled' : ''}>Avant</button><button aria-pressed="${!front}" onclick="send({a:'face_facing',cam:'${esc(faceCam)}',facing:'back'})" ${rec ? 'disabled' : ''}>Arrière</button></span></div>
+        <div class="prev">${cam && cam.preview_ts ? `<img data-prev="${esc(cam.id)}" src="/preview/${esc(cam.id)}?t=${cam.preview_ts}" alt="">` : 'En attente de l\'image…'}</div>
+        <p class="hint" style="margin:0">Visage de face, à 40–70 cm, bien éclairé de face, sans contre-jour. ${front ? '' : 'Caméra avant : vous vous voyez pendant la prise.'}</p>
+        ${rec ? `<button class="recbtn stop" onclick="send({a:'stop'})">Arrêter</button>` :
+          `<button class="recbtn" ${stopping ? 'disabled' : ''} onclick="send({a:'face_record',cam:'${esc(faceCam)}'})">${stopping ? 'Envoi de la vidéo…' : 'Enregistrer le visage'}</button>`}`
+      : '<p class="hint" style="margin:0">Connectez un téléphone (onglet Tournage) pour filmer, ou importez une vidéo.</p>'}
+      <button class="btn" onclick="$('faceFile').click()">Importer une vidéo…</button>`;
+  }
+  $('facesList').innerHTML = L.length ? L.map(f => `<div class="tk" role="button" tabindex="0" aria-selected="${f.name === faceSel}" onclick="selectFace('${esc(f.name)}')">
+      <span class="n">${esc(f.name)}</span><span class="st">${faceStatus(f)}</span>
+      <span class="s">${f.created ? esc(f.created.slice(0, 16).replace(' ', ', ')) : ''}${f.duration ? ', ' + fr(f.duration) + ' s' : ''}</span>
+      <span class="s" style="justify-self:end">${esc(f.camera || '')}</span></div>`).join('')
+    : '<div class="empty-page">Aucune capture du visage pour l\'instant.</div>';
+  renderFaceDetail();
+}
+function selectFace(n) { faceSel = n; renderFace(); }
+window.selectFace = selectFace;
+let faceDetailKey = '';
+function renderFaceDetail(force) {
+  const box = $('faceDetail');
+  const f = (S.faces || []).find(x => x.name === faceSel);
+  const P = S.processing;
+  const running = P && P.running && f && P.take === f.name;
+  const queued = f && S.queue.some(j => j.take === f.name);
+  const chars = S.characters.filter(c => !c.info || c.info.arkit === undefined || c.info.arkit > 0);
+  const key = JSON.stringify([f, running && P.step, queued, chars.map(c => c.id), S.face_character]);
+  if (!force && key === faceDetailKey) return;
+  faceDetailKey = key;
+  if (!f) { box.innerHTML = '<div class="empty-page">Filmez ou importez une vidéo de visage : une seule caméra suffit.</div>'; return; }
+  const oldView = document.getElementById('faceView');
+  const keepView = oldView && oldView.dataset.face === f.name && oldView.dataset.glb === String(f.glb) && oldView.dataset.c === (window.faceSrc || '');
+  const steps = running && P.kind === 'visage' ? `<div class="steps">${FACE_STEPS.map((t, i) => `<div class="step ${i + 1 < P.step ? 'done' : i + 1 === P.step ? 'cur' : ''}"><span class="n">${i + 1}</span><span>${t}</span></div>`).join('')}</div>` : '';
+  const animated = chars.filter(c => f.characters.includes(c.id));
+  if (window.faceSrc && !animated.some(c => c.id === window.faceSrc)) window.faceSrc = '';
+  box.innerHTML = `
+    <div class="take-head">
+      <div><h1>${esc(f.name)}</h1>
+        <div class="sub">${f.created ? esc(f.created) : ''}${f.duration ? ' — ' + fr(f.duration) + ' s' : ''}${f.frames ? ` — ${f.frames} images à ${fr(f.fps, 0)} i/s` : ''} — ${esc(f.video || 'pas de vidéo')}</div></div>
+      <button class="btn small danger icon-btn" ${running ? 'disabled' : ''} onclick="if(confirm('Supprimer ${esc(f.name)} ?\\n\\nSon dossier part à la corbeille de Windows.')) send({a:'face_delete',name:'${esc(f.name)}'})">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg>
+        Supprimer</button>
+    </div>
+    <div class="grid2">
+      <div class="panel">
+        <div id="faceViewSlot"></div>
+        ${animated.length ? `<div class="row" style="align-items:center"><span class="hint">Afficher</span><span class="seg"><button aria-pressed="${!window.faceSrc}" onclick="window.faceSrc=''; renderFaceDetail(true)">Visage MOCAM</button>${animated.map(c => `<button aria-pressed="${window.faceSrc === c.id}" onclick="window.faceSrc='${esc(c.id)}'; renderFaceDetail(true)">${esc(c.name)}</button>`).join('')}</span></div>` : ''}
+        <div class="headvals" id="faceHead"></div>
+        <div class="bars" id="faceBars">${f.processed ? '' : '<p class="hint">Les 52 blendshapes s\'affichent ici une fois la vidéo traitée.</p>'}</div>
+      </div>
+      <div style="display:grid; gap:18px">
+        <div class="panel">
+          <div class="side-h">Traitement</div>
+          ${running ? `<div class="hint">En cours${P.step ? ` : étape ${P.step} sur 4` : '…'}</div>${steps}` :
+            queued ? '<div class="hint">En attente de son tour.</div>' :
+            `<div class="${f.processed ? 'ok-t' : 'hint'}">${f.processed ? 'Visage traité : 52 blendshapes ARKit' : 'Moins d'une minute pour 20 s de vidéo.'}</div>
+             <div><button class="btn ${f.processed ? '' : 'primary'}" onclick="send({a:'face_process',name:'${esc(f.name)}'})" ${f.video ? '' : 'disabled'}>${f.processed ? 'Retraiter' : 'Traiter la vidéo'}</button></div>`}
+        </div>
+        <div class="panel">
+          <div class="side-h">Réglages</div>
+          <div class="row" style="align-items:center"><span class="hint" style="min-width:90px">Lissage</span><span class="seg">${['faible', 'moyen', 'fort'].map(l => `<button aria-pressed="${f.lissage === l}" onclick="faceSet('${esc(f.name)}', {lissage:'${l}'})">${l[0].toUpperCase() + l.slice(1)}</button>`).join('')}</span></div>
+          <div class="row" style="align-items:center"><span class="hint" style="min-width:90px">Intensité</span><input type="range" min="50" max="150" step="5" value="${f.intensite}" style="flex:1; accent-color: var(--act)" oninput="this.nextElementSibling.textContent=this.value+' %'" onchange="faceSet('${esc(f.name)}', {intensite:+this.value})"><span class="hint" style="min-width:48px">${f.intensite} %</span></div>
+          <label class="row" style="align-items:center; gap:8px"><input type="checkbox" ${f.miroir ? 'checked' : ''} onchange="faceSet('${esc(f.name)}', {miroir:this.checked})"> Vidéo en miroir (inverse gauche et droite)</label>
+          <p class="hint" style="margin:0">Faible : plus de détails, un peu plus de bruit. Fort : très doux. Un changement refait les courbes en quelques secondes, sans refaire le suivi.</p>
+        </div>
+        <div class="panel">
+          <div class="side-h">Fichiers</div>
+          ${f.fbx ? `<div class="file"><span class="ext">FBX</span><span>${esc(f.name)}.fbx — visage MOCAM, 52 blendshapes ARKit + tête</span></div>` : ''}
+          ${f.csv ? `<div class="file"><span class="ext">CSV</span><span>${esc(f.name)}.csv — courbes au format Live Link Face</span></div>` : ''}
+          ${f.characters.map(c => `<div class="file"><span class="ext">FBX</span><span>${esc(f.name)}_${esc(c)}.fbx — ${esc((S.characters.find(x => x.id === c) || {}).name || c)} animé</span></div>`).join('')}
+          ${!f.fbx && !f.csv ? '<div class="hint">Les fichiers sont créés à la fin du traitement.</div>' : ''}
+          <div><button class="btn" onclick="send({a:'face_open',name:'${esc(f.name)}'})">Ouvrir le dossier</button></div>
+          <div class="side-h" style="margin-top:6px">Personnage à blendshapes</div>
+          ${chars.length ? `<div class="row"><select class="input" id="faceChar" style="flex:1">${chars.map(c => `<option value="${esc(c.id)}" ${c.id === S.face_character ? 'selected' : ''}>${esc(c.name)}${c.info && c.info.arkit ? ` (${c.info.arkit} blendshapes)` : ''}</option>`).join('')}</select>
+             <button class="btn" ${f.processed && !running ? '' : 'disabled'} onclick="send({a:'face_animate',name:'${esc(f.name)}',id:$('faceChar').value})">Animer</button></div>
+             <label class="row" style="align-items:center; gap:8px"><input type="checkbox" ${S.face_character ? 'checked' : ''} onchange="send({a:'face_character_default', id: this.checked ? $('faceChar').value : ''})"> Animer ce personnage après chaque capture</label>`
+            : '<div class="hint">Importez dans l\'onglet Personnages un modèle dont les blendshapes portent les noms ARKit (eyeBlinkLeft, jawOpen…) : ses blendshapes seront animées.</div>'}
+        </div>
+      </div>
+    </div>
+    <details class="log" ${running ? 'open' : ''}><summary>Journal du traitement</summary><div class="logbox" id="faceLog"></div></details>`;
+  const slot = $('faceViewSlot');
+  if (keepView) slot.replaceWith(oldView);
+  else {
+    slot.outerHTML = `<div class="face-view" id="faceView" data-face="${esc(f.name)}" data-glb="${f.glb}" data-c="${esc(window.faceSrc || '')}">
+      ${f.video ? `<video id="faceVideo" src="/visage/${encodeURIComponent(f.name)}/video" controls playsinline muted loop preload="auto"></video>` : '<div class="viewer"><div class="empty">Pas de vidéo</div></div>'}
+      <div class="viewer" id="faceBox"><div class="empty" id="faceEmpty">${f.glb || window.faceSrc ? 'Chargement du visage…' : 'Le visage 3D apparaît une fois la vidéo traitée.'}</div></div></div>`;
+    faceCurves = null;
+    if (f.processed) loadFaceCurves(f.name);
+  }
+  if (!faceCurves && f.processed && !keepView) loadFaceCurves(f.name);
+  else if (faceCurves && keepView) loadFaceBars();
+  if ((f.glb || window.faceSrc) && window.mcFace) window.mcFace.show(f.name, window.faceSrc || '');
+  if (P && P.take === f.name && $('faceLog')) $('faceLog').textContent = logText;
+}
+window.renderFaceDetail = renderFaceDetail;
+function faceSet(name, kw) { send(Object.assign({ a: 'face_settings', name, apply: true }, kw)); }
+window.faceSet = faceSet;
+function loadFaceBars() {
+  const d = faceCurves, el = $('faceBars');
+  if (!d || !el) return;
+  el.innerHTML = FACE_GROUPS.map(([g, test]) => `<h4>${g}</h4>` + d.names.map((n, i) => test(n) ? `<div class="bar" title="${n}"><span>${n}</span><i><b data-i="${i}"></b></i></div>` : '').join('')).join('');
+}
+async function loadFaceCurves(name) {
+  try {
+    const r = await fetch(`/visage/${encodeURIComponent(name)}/courbes.json?t=${Date.now()}`);
+    if (!r.ok) return;
+    const d = await r.json();
+    if (faceSel !== name) return;
+    faceCurves = d;
+    loadFaceBars();
+  } catch (e) { /* courbes indisponibles */ }
+}
+(function faceLoop() {
+  requestAnimationFrame(faceLoop);
+  const v = document.getElementById('faceVideo');
+  if (!faceCurves || !v || $('pFace').offsetParent === null) return;
+  const i = Math.max(0, Math.min(faceCurves.frames - 1, Math.round(v.currentTime * faceCurves.fps)));
+  const w = faceCurves.weights[i];
+  document.querySelectorAll('#faceBars b[data-i]').forEach(b => { b.style.width = (100 * w[+b.dataset.i]).toFixed(1) + '%'; });
+  const h = faceCurves.head[i];
+  const hv = $('faceHead');
+  if (hv && h) hv.innerHTML = `Tête : lacet <b>${h[0].toFixed(0)}°</b> tangage <b>${h[1].toFixed(0)}°</b> roulis <b>${h[2].toFixed(0)}°</b>`;
+})();
+async function uploadFace(file) {
+  if (!file) return;
+  toast(`Envoi de ${file.name}…`);
+  try {
+    const r = await fetch(`/visage/import?filename=${encodeURIComponent(file.name)}`, { method: 'POST', body: file });
+    const j = await r.json();
+    if (j.ok) { faceSel = j.name; toast(`${j.name} : vidéo reçue, traitement lancé`, 'ok'); }
+    else toast(j.message || 'Vidéo refusée', 'error');
+  } catch (e) { toast('Envoi impossible : ' + e, 'error'); }
+}
+$('faceFile').onchange = (e) => { uploadFace(e.target.files[0]); e.target.value = ''; };
+$('pFace').addEventListener('dragover', (e) => e.preventDefault());
+$('pFace').addEventListener('drop', (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) uploadFace(f); });
+
 // ---------------------------------------------------------------- rendu global
 function render() {
   $('nCams').textContent = S.cams.length ? S.cams.length : '';
   $('nTakes').textContent = S.takes.length ? S.takes.length : '';
   $('nChars').textContent = S.characters.length ? S.characters.length : '';
+  $('nFaces').textContent = (S.faces || []).length ? S.faces.length : '';
   const n = S.net || {};
   const st = S.cams.length >= 2 ? 'ok' : S.cams.length ? 'warn' : 'err';
   $('net').innerHTML = `<span class="dot ${(n.adapters || []).length ? (n.public && n.firewall_rule === false ? 'warn' : 'ok') : 'err'}"></span>${n.ssid ? `Wi-Fi <b>${esc(n.ssid)}</b>` : n.hotspot && n.hotspot.on ? 'Point d\'accès du PC' : (n.adapters || []).length ? 'Réseau filaire' : 'Pas de réseau'}<span class="dot ${st}" style="margin-left:10px"></span>${S.cams.length} caméra${S.cams.length > 1 ? 's' : ''}`;
@@ -760,6 +953,7 @@ function render() {
   renderTakesList();
   renderTakeDetail();
   renderChars();
+  renderFace();
 }
 
 setInterval(() => {
@@ -896,6 +1090,76 @@ window.mcViewer = {
   },
   toggle() { V.playing = !V.playing; return V.playing; },
   seek(f) { V.t = V.dur * f; },
+};
+// visage 3D (onglet Visage) : suit le temps de la vidéo
+const F = { r: null, scene: null, cam: null, ctl: null, mixer: null, box: null, key: '', raf: 0 };
+function faceLoopGl() {
+  F.raf = requestAnimationFrame(faceLoopGl);
+  if (!F.r || !F.box.isConnected || F.box.offsetParent === null) return;
+  const v = document.getElementById('faceVideo');
+  if (F.mixer && v) F.mixer.setTime(v.currentTime);
+  F.ctl.update();
+  F.r.render(F.scene, F.cam);
+}
+function faceResize() {
+  if (!F.r || !F.box) return;
+  const w = F.box.clientWidth, h = F.box.clientHeight;
+  if (w && h) { F.r.setSize(w, h, false); F.cam.aspect = w / h; F.cam.updateProjectionMatrix(); }
+}
+window.mcFace = {
+  async show(name, cid) {
+    const box = document.getElementById('faceBox');
+    if (!box) return;
+    const key = `${name}|${cid}`;
+    if (F.box !== box) {
+      cancelAnimationFrame(F.raf);
+      if (F.r) { F.r.dispose(); F.r.domElement.remove(); }
+      F.box = box;
+      F.r = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      F.r.setPixelRatio(Math.min(2, devicePixelRatio));
+      F.r.outputColorSpace = THREE.SRGBColorSpace;
+      box.appendChild(F.r.domElement);
+      F.scene = new THREE.Scene();
+      F.cam = new THREE.PerspectiveCamera(30, 0.75, 0.01, 100);
+      F.ctl = new OrbitControls(F.cam, F.r.domElement);
+      F.ctl.enableDamping = true;
+      F.scene.add(new THREE.HemisphereLight(0xfff4ec, 0x30333a, 2.0));
+      const key1 = new THREE.DirectionalLight(0xffffff, 2.4); key1.position.set(1, 1.5, 2); F.scene.add(key1);
+      const rim = new THREE.DirectionalLight(0x9fb8ff, 1.2); rim.position.set(-2, 1, -1); F.scene.add(rim);
+      new ResizeObserver(faceResize).observe(box);
+      faceResize();
+      F.key = '';
+      faceLoopGl();
+    }
+    if (key === F.key) return;
+    F.key = key;
+    const empty = document.getElementById('faceEmpty');
+    try {
+      const url = `/visage/${encodeURIComponent(name)}/apercu.glb?${cid ? 'c=' + encodeURIComponent(cid) + '&' : ''}t=${Date.now()}`;
+      const g = await new GLTFLoader().loadAsync(url);
+      if (F.key !== key) return;
+      for (const o of [...F.scene.children]) if (o.userData.content) F.scene.remove(o);
+      g.scene.userData.content = true;
+      g.scene.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
+      F.scene.add(g.scene);
+      F.mixer = null;
+      if (g.animations.length) {
+        F.mixer = new THREE.AnimationMixer(g.scene);
+        for (const c of g.animations) F.mixer.clipAction(c).play();
+      }
+      F.mixer && F.mixer.setTime(0);
+      // cadrage sur la tête : boîte des maillages qui ont des blendshapes, sinon de tout
+      let bb = new THREE.Box3();
+      g.scene.traverse(o => { if (o.isMesh && o.morphTargetInfluences && o.morphTargetInfluences.length) bb.expandByObject(o); });
+      if (bb.isEmpty()) bb = new THREE.Box3().setFromObject(g.scene);
+      const c = bb.getCenter(new THREE.Vector3()), sz = bb.getSize(new THREE.Vector3());
+      const d = Math.max(sz.y, sz.x) * 2.4;
+      F.cam.position.set(c.x, c.y + sz.y * 0.05, c.z + d);
+      F.cam.near = d / 100; F.cam.far = d * 50; F.cam.updateProjectionMatrix();
+      F.ctl.target.copy(c); F.ctl.update();
+      if (empty) empty.remove();
+    } catch (e) { if (empty) empty.textContent = 'Visage 3D indisponible : ' + e.message; }
+  },
 };
 if (window.mcRerender) window.mcRerender();
 

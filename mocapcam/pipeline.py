@@ -29,6 +29,7 @@ DEFAULT_STUDIO = {
     # taille de l'acteur (cm) : le squelette exporté est mis à cette taille (vide = échelle des boules)
     "actor_height_cm": None,
     "character": "",        # personnage animé après chaque traitement (studio/personnages/<id>) ; vide : le fourni (Y Bot)
+    "face_character": "",   # personnage à blendshapes ARKit animé après chaque capture faciale
     "blender": "",          # chemin de blender.exe pour l'export FBX (vide = recherche automatique)
     "fbx": True,            # créer <prise>.fbx (squelette Mixamo animé) après le traitement
     "sync_by_motion": True,  # affiner la synchro du bip avec le mouvement de l'acteur

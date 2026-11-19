@@ -274,7 +274,7 @@ async def main():
                 SHOTS.append(shot1)
 
                 # enregistrement
-                await page.locator("button.recbtn").click()
+                await page.locator("#recArea button.recbtn").click()
                 t_click = time.time() * 1000
                 for _ in range(80):
                     await page.wait_for_timeout(100)
@@ -287,7 +287,7 @@ async def main():
                 SHOTS.append(shot2)
                 ok("signal sonore joué au départ", bool(chirps),
                    f"{(chirps[0] - t_click) / 1000:.2f} s après le clic" if chirps else "aucun")
-                await page.locator("button.recbtn.stop").click()
+                await page.locator("#recArea button.recbtn.stop").click()
                 for _ in range(120):
                     await page.wait_for_timeout(250)
                     st = await ui_state(session)
@@ -327,8 +327,34 @@ async def main():
                 ok("bouton Traiter + étapes + journal en direct", "1/6" in txt and "3/6" in txt and 3 in steps_seen,
                    f"étapes vues {sorted(steps_seen)} ; " +
                    " / ".join(l for l in txt.splitlines() if l.strip().startswith(("1/6", "2/6", "3/6", "4/6")))[:300])
+                # capture du visage : une seule caméra, sans bip, rangée dans « visages »
+                st0 = await ui_state(session)
+                cam0 = st0["cams"][0]
+                await page.evaluate(f"send({{a:'face_facing', cam:'{cam0['id']}', facing:'front'}})")
+                await page.evaluate(f"send({{a:'face_record', cam:'{cam0['id']}'}})")
+                await page.wait_for_timeout(3500)
+                stx = await ui_state(session)
+                one = stx["take"] and stx["take"].get("kind") == "visage" and len(stx["take"]["cams"]) == 1
+                await page.evaluate("send({a:'stop'})")
+                fdir = os.path.join(os.path.dirname(CAPT), "visages")
+                vid = None
+                for _ in range(40):
+                    await page.wait_for_timeout(500)
+                    names = os.listdir(fdir) if os.path.isdir(fdir) else []
+                    vids = [f for n in names for f in os.listdir(os.path.join(fdir, n)) if f.endswith((".mp4", ".mov"))]
+                    if vids and any(os.path.exists(os.path.join(fdir, n, "take.json")) for n in names):
+                        vid = vids[0]
+                        break
+                fmeta = {}
+                if vid:
+                    with open(os.path.join(fdir, names[0], "take.json")) as fh:
+                        fmeta = json.load(fh)
+                stx = await ui_state(session)
+                ok("capture du visage avec une seule caméra", one and vid and fmeta.get("kind") == "visage"
+                   and any(f["name"] == names[0] for f in stx["faces"]),
+                   f"{names[0] if vid else '?'} : {vid}, caméra {fmeta.get('camera')}, {len(stx['faces'])} visage(s) listé(s)")
                 # « Ouvrir le dossier » ne coupe pas la connexion ; suppression d'une prise
-                await page.locator("button", has_text="Ouvrir le dossier").click()
+                await page.locator("#takeDetail button", has_text="Ouvrir le dossier").click()
                 await page.wait_for_timeout(1500)
                 disc = await page.locator("#disc").is_visible()
                 dd = os.path.join(CAPT, "a_supprimer")
@@ -340,7 +366,7 @@ async def main():
                 await page.evaluate("selectTake('a_supprimer')")
                 await page.wait_for_timeout(500)
                 page.once("dialog", lambda dlg: asyncio.ensure_future(dlg.accept()))
-                await page.locator("button", has_text="Supprimer la prise").click()
+                await page.locator("#takeDetail button", has_text="Supprimer la prise").click()
                 for _ in range(20):
                     await page.wait_for_timeout(300)
                     if not os.path.isdir(dd):

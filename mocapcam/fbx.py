@@ -132,3 +132,22 @@ def rig_preview(mocap_json, glb_path, blender=None, log=print):
     """Aperçu 3D d'une prise déjà traitée : rig Mixamo animé avec le mannequin (GLB)."""
     return _run_blender(["rig", os.path.abspath(mocap_json), os.path.abspath(glb_path)],
                         "MOCAPCAM_RIG_OK", blender, log, timeout=900)
+
+
+def face_export(face_json, fbx_path, glb_path=None, blender=None, log=print):
+    """Visage MOCAM animé (52 blendshapes ARKit + os de tête) : FBX (+ GLB d'aperçu)."""
+    args = ["face", os.path.abspath(face_json), os.path.abspath(fbx_path)]
+    if glb_path:
+        args.append(os.path.abspath(glb_path))
+    rep = _run_blender(args, "MOCAPCAM_FACE_OK", blender, log, timeout=900)
+    if rep:
+        log(f"    FBX : {fbx_path} ({rep['shapes']} blendshapes, {rep['frames']} images)")
+    return rep
+
+
+def face_character(face_json, character, out_fbx, glb_path=None, blender=None, log=print):
+    """Courbes de visage appliquées aux blendshapes ARKit d'un personnage : FBX (+ GLB)."""
+    args = ["face_character", os.path.abspath(face_json), os.path.abspath(character), os.path.abspath(out_fbx)]
+    if glb_path:
+        args.append(os.path.abspath(glb_path))
+    return _run_blender(args, "MOCAPCAM_FACECHAR_OK", blender, log, timeout=1200)

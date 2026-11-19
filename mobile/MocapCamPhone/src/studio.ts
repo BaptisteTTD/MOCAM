@@ -12,7 +12,7 @@ export type StudioCommand =
   | { t: 'identify' }
   | { t: 'rename'; name: string }
   | { t: 'preview'; fps: number }
-  | { t: 'config'; prefer60?: boolean; preview?: number; lens?: 'wide' | 'ultra'; fov?: number }
+  | { t: 'config'; prefer60?: boolean; preview?: number; lens?: 'wide' | 'ultra'; fov?: number; facing?: 'front' | 'back' }
   | { t: 'error'; message: string }
 
 export interface ConnectInfo {

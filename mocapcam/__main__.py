@@ -7,6 +7,8 @@
   python -m mocapcam fbx         DOSSIER_PRISE [--blender CHEMIN] [--absolu]
   python -m mocapcam taille      DOSSIER_PRISE TAILLE_CM      (prise déjà traitée)
   python -m mocapcam animer      STUDIO DOSSIER_PRISE PERSONNAGE  (personnage de studio/personnages)
+  python -m mocapcam visage      DOSSIER_VISAGE [--studio S] [--retraiter]   (capture faciale)
+  python -m mocapcam visage-perso STUDIO DOSSIER_VISAGE PERSONNAGE
 """
 import argparse
 import os
@@ -65,6 +67,18 @@ def main(argv=None):
     p.add_argument("personnage", help="identifiant du personnage (dossier de studio/personnages)")
     p.add_argument("--blender", help="chemin de blender.exe (sinon studio.json ou recherche automatique)")
 
+    p = sub.add_parser("visage", help="capture faciale : vidéo d'un visage -> 52 blendshapes ARKit (FBX, CSV)")
+    p.add_argument("dossier", help="dossier de la prise de visage (avec sa vidéo)")
+    p.add_argument("--studio", default=os.path.join(ROOT, "studio"))
+    p.add_argument("--blender")
+    p.add_argument("--retraiter", action="store_true", help="refaire le suivi du visage")
+
+    p = sub.add_parser("visage-perso", help="applique une prise de visage aux blendshapes d'un personnage")
+    p.add_argument("studio")
+    p.add_argument("dossier")
+    p.add_argument("personnage")
+    p.add_argument("--blender")
+
     a = ap.parse_args(argv)
     try:
         if a.cmd == "studio":
@@ -86,6 +100,16 @@ def main(argv=None):
                                   studio_dir=a.studio if os.path.isdir(a.studio) else None)
         elif a.cmd == "animer":
             pipeline.animate_character(a.capture, a.studio, a.personnage, blender=a.blender)
+        elif a.cmd == "visage":
+            from . import face
+            st = a.studio if os.path.isdir(a.studio) else None
+            bl = a.blender or ((pipeline.load_studio(st) or {}).get("blender") if st else None)
+            face.run(a.dossier, studio_dir=st, blender=bl, retrack=a.retraiter)
+        elif a.cmd == "visage-perso":
+            from . import face
+            bl = a.blender or (pipeline.load_studio(a.studio) or {}).get("blender")
+            if not face.animate_character(a.dossier, a.studio, a.personnage, blender=bl):
+                return 1
         elif a.cmd == "init":
             path = pipeline.init_studio(a.studio)
             print(f"Studio créé : {path}\nMesurez la position de vos boules et éditez ce fichier.")

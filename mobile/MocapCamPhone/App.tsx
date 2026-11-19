@@ -46,7 +46,7 @@ import {
   type Settings,
 } from './src/settings'
 
-const APP_VERSION = '1.2.1'
+const APP_VERSION = '1.3.0'
 
 // Erreurs hors affichage (minuteries, callbacks natifs) : on les montre à l'écran
 // au lieu de laisser l'app se fermer.
@@ -303,7 +303,14 @@ function CaptureScreen({
   // sans zoom) à ×0,5 environ (ultra grand-angle). On ne fait qu'élargir, jamais zoomer :
   // ×1 est le plus serré. Choisi sur le téléphone ou depuis Studio.
   const [fov, setFov] = useState(1)
+  // caméra avant : capture faciale (onglet Visage de MOCAM Studio)
+  const [facing, setFacing] = useState<'back' | 'front'>('back')
   const lensSetup = useMemo(() => {
+    if (facing === 'front') {
+      const front = allDevices.find((d) => d.position === 'front' && !d.isVirtualDevice) ??
+        allDevices.find((d) => d.position === 'front')
+      if (front) return { device: front, zoom: 1, available: false, used: 'front' as const, fov: 1, options: [1] }
+    }
     const back = allDevices.filter((d) => d.position === 'back')
     const physical = (t: string) => back.find((d) => d.type === t && !d.isVirtualDevice)
     let wide = defaultBack
@@ -342,7 +349,7 @@ function CaptureScreen({
     if (want < 0.99 && zoomOutDev)
       return { device: zoomOutDev, zoom: Math.max(zoomOutDev.minZoom, want), available, used: 'ultra' as const, fov: want, options }
     return { device: wide, zoom: 1, available, used: 'wide' as const, fov: 1, options }
-  }, [allDevices, defaultBack, fov])
+  }, [allDevices, defaultBack, fov, facing])
   const device = lensSetup.device
 
   // 1080p par défaut ; si le téléphone refuse 60 i/s en 1080p et que le PC demande
@@ -677,6 +684,7 @@ function CaptureScreen({
           break
         case 'config':
           if (!recorderRef.current?.isRecording) {
+            if (cmd.facing === 'front' || cmd.facing === 'back') setFacing(cmd.facing)
             if (typeof cmd.fov === 'number') setFov(cmd.fov)
             else if (cmd.lens === 'wide' || cmd.lens === 'ultra') setFov(cmd.lens === 'ultra' ? 0.5 : 1)
           }
@@ -780,6 +788,7 @@ function CaptureScreen({
         zoom: liveRef.current.lensSetup.zoom,
         fov: liveRef.current.lensSetup.fov,
         fov_options: liveRef.current.lensSetup.options,
+        facing: liveRef.current.lensSetup.used === 'front' ? 'front' : 'back',
         app: APP_VERSION,
         supports60: (() => {
           try {
@@ -893,7 +902,7 @@ function CaptureScreen({
 
       <View style={styles.bottomBar}>
         {lensSetup.options.length < 2 ? (
-          <Text style={styles.small}>×1 : ce téléphone ne laisse pas l'app élargir le champ</Text>
+          <Text style={styles.small}>{lensSetup.used === 'front' ? 'Caméra avant : capture du visage' : "×1 : ce téléphone ne laisse pas l'app élargir le champ"}</Text>
         ) : null}
         <View style={[styles.seg, lensSetup.options.length < 2 ? { display: 'none' } : null]}>
           {lensSetup.options.map((v) => {

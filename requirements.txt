@@ -6,3 +6,4 @@ rtmlib
 onnxruntime
 aiohttp
 segno
+mediapipe

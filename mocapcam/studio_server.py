@@ -35,7 +35,7 @@ from . import fbx, markers as mk, pipeline, sync
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "studio_ui")
 # version du serveur : l'interface (index.html) vérifie qu'elle parle au serveur de la même version
-STUDIO_VERSION = "1.4.3"
+STUDIO_VERSION = "1.5.0"
 
 # horloge du PC en ms (monotone, calée sur l'heure système au démarrage)
 _EPOCH = time.time() * 1000 - time.monotonic() * 1000
@@ -236,6 +236,9 @@ class Studio:
         self.studio_dir = os.path.abspath(studio_dir)
         self.captures_dir = os.path.abspath(captures_dir)
         os.makedirs(self.captures_dir, exist_ok=True)
+        # prises de visage (capture faciale, une caméra) : dossier « visages » à côté des prises
+        self.faces_dir = os.path.join(os.path.dirname(self.captures_dir), "visages")
+        os.makedirs(self.faces_dir, exist_ok=True)
         if not os.path.exists(os.path.join(self.studio_dir, "studio.json")):
             pipeline.init_studio(self.studio_dir)
         self.port = port
@@ -351,6 +354,36 @@ class Studio:
                             created=meta.get("created"), duration=meta.get("duration_s")))
         return out[:60]
 
+    def faces_list(self):
+        from . import face as facemod
+        out = []
+        if not os.path.isdir(self.faces_dir):
+            return out
+        for d in sorted(os.listdir(self.faces_dir), reverse=True):
+            p = os.path.join(self.faces_dir, d)
+            if not os.path.isdir(p) or d.startswith((".", "_")):
+                continue
+            meta = facemod.read_meta(p)
+            vid = facemod.find_video(p)
+            o = facemod.outputs(p)
+            chars = [c[len(d) + 1:-4] for c in os.listdir(p) if c.startswith(d + "_") and c.endswith(".fbx")
+                     and os.path.exists(facemod.character_outputs(p, c[len(d) + 1:-4])[1])]
+            out.append(dict(name=d, video=os.path.basename(vid) if vid else None, created=meta.get("created"),
+                            duration=meta.get("duration_s"), camera=meta.get("camera"),
+                            processed=os.path.exists(o["json"]), fbx=os.path.exists(o["fbx"]),
+                            csv=os.path.exists(o["csv"]), glb=os.path.exists(o["glb"]),
+                            frames=meta.get("frames"), fps=meta.get("fps"), characters=chars,
+                            lissage=meta.get("lissage", "moyen"), intensite=meta.get("intensite", 100),
+                            miroir=bool(meta.get("miroir", False))))
+        return out[:80]
+
+    def next_face_name(self):
+        n = 1
+        names = set(os.listdir(self.faces_dir)) if os.path.isdir(self.faces_dir) else set()
+        while f"visage_{n:03d}" in names:
+            n += 1
+        return f"visage_{n:03d}"
+
     def next_take_name(self):
         n = 1
         names = {t["name"] for t in self.takes_list()}
@@ -362,7 +395,7 @@ class Studio:
         cfg = self.cfg()
         proc = None
         if self.proc is not None:
-            proc = {k: self.proc.get(k) for k in ("take", "running", "ok", "kind", "label", "step", "step_label")}
+            proc = {k: self.proc.get(k) for k in ("take", "running", "ok", "kind", "label", "step", "steps", "step_label")}
         q = self.qr_payload()
         return dict(
             type="state", cams=[c.public() for c in self.cams.values()],
@@ -377,6 +410,8 @@ class Studio:
             actor_height_cm=cfg.get("actor_height_cm"),
             characters=pipeline.list_characters(self.studio_dir),
             character=pipeline.default_character(self.studio_dir, cfg),
+            faces=self.faces_list(), face_character=cfg.get("face_character") or "",
+            next_face=self.next_face_name(),
             char_busy=self.char_busy, blender=self.has_blender, version=STUDIO_VERSION,
         )
 
@@ -648,21 +683,27 @@ class Studio:
             json.dump(cfg, f, indent=2, ensure_ascii=False)
 
     # ------------------------------------------------------------------ enregistrement
-    async def start_take(self, name):
+    async def start_take(self, name, cam_id=None, kind="corps"):
         if self.take and self.take["state"] in ("starting", "recording", "stopping"):
             await self.toast("Un enregistrement est déjà en cours", "warn")
             return
         cams = list(self.cams.values())
+        if cam_id is not None:
+            cams = [c for c in cams if c.id == cam_id]
         if not cams:
             await self.toast("Aucune caméra connectée", "error")
             return
-        name = safe_name(name, self.next_take_name())
-        d = os.path.join(self.captures_dir, name)
+        if kind == "visage":
+            name = safe_name(name, self.next_face_name())
+            d = os.path.join(self.faces_dir, name)
+        else:
+            name = safe_name(name, self.next_take_name())
+            d = os.path.join(self.captures_dir, name)
         if os.path.exists(d) and any(f.lower().endswith((".mp4", ".mov")) for f in os.listdir(d)):
             await self.toast(f"La prise {name} existe déjà : choisissez un autre nom", "error")
             return
         os.makedirs(d, exist_ok=True)
-        self.take = dict(name=name, state="starting", dir=d, cams=[c.id for c in cams],
+        self.take = dict(name=name, state="starting", dir=d, cams=[c.id for c in cams], kind=kind,
                          created=time.strftime("%Y-%m-%d %H:%M:%S"), chirp_at_pc=None,
                          actor_height_cm=self.cfg().get("actor_height_cm"))
         for c in cams:
@@ -674,12 +715,20 @@ class Studio:
         for c in cams:
             await self.send(c, dict(t="start", take=name, at=at + c.offset))
         self.changed()
+        if kind == "visage":          # une seule caméra : pas de bip de synchronisation
+            asyncio.get_running_loop().call_later(2.0, lambda: self._mark_recording(name))
+            return
         # le signal sonore part quand tout le monde enregistre (au plus tard 4 s après)
         asyncio.get_running_loop().call_later(5.5, lambda: asyncio.ensure_future(self.maybe_chirp(force=True)))
 
+    def _mark_recording(self, name):
+        if self.take and self.take["name"] == name and self.take["state"] == "starting":
+            self.take["state"] = "recording"
+            self.changed()
+
     async def maybe_chirp(self, force=False):
         tk = self.take
-        if not tk or tk.get("chirp_at_pc") or tk["state"] not in ("starting", "recording"):
+        if not tk or tk.get("kind") == "visage" or tk.get("chirp_at_pc") or tk["state"] not in ("starting", "recording"):
             return
         cams = [self.cams[i] for i in tk["cams"] if i in self.cams]
         if not force and not all(c.take.get("state") == "recording" for c in cams):
@@ -742,11 +791,44 @@ class Studio:
             return
         cams = [self.cams[i] for i in tk["cams"] if i in self.cams]
         if all(c.take.get("state") in ("done", "error") for c in cams):
+            if tk.get("kind") == "visage":
+                await self.finish_face_take(tk, cams)
+                return
             self.write_take_json()
             n = len([f for f in os.listdir(tk["dir"]) if f.lower().endswith((".mp4", ".mov"))])
             tk["state"] = "ready"
             await self.toast(f"Prise {tk['name']} rapatriée ({n} vidéo(s))")
             self.changed()
+
+    async def finish_face_take(self, tk, cams):
+        from . import face as facemod
+        c = cams[0] if cams else None
+        facemod.write_meta(tk["dir"], take=tk["name"], kind="visage", created=tk["created"],
+                           camera=c.name if c else None, facing=c.status.get("facing") if c else None,
+                           duration_s=round((tk.get("stopped_at_pc", now_ms()) - tk.get("at_pc", now_ms())) / 1000, 1),
+                           fps_camera=c.status.get("fps") if c else None, model=c.model if c else None,
+                           miroir=False)
+        tk["state"] = "ready"
+        if facemod.find_video(tk["dir"]):
+            await self.toast(f"Visage {tk['name']} rapatrié : traitement lancé", "ok")
+            await self.enqueue_face("visage", tk["name"])
+        else:
+            await self.toast(f"Visage {tk['name']} : la vidéo n'est pas arrivée", "error")
+        self.changed()
+
+    async def enqueue_face(self, kind, name, args=(), label=None):
+        name = safe_name(name)
+        d = os.path.join(self.faces_dir, name)
+        if not os.path.isdir(d):
+            await self.toast(f"Prise de visage introuvable : {name}", "error")
+            return
+        if any(j["kind"] == kind and j["take"] == name and j["args"] == list(args) for j in self.queue):
+            return
+        self.queue.append(dict(kind=kind, take=name, args=list(args), dir=d,
+                               label=label or ("Capture faciale" if kind == "visage" else "Animation du visage")))
+        self.changed()
+        if not (self.proc and self.proc["running"]):
+            asyncio.ensure_future(self.run_queue())
 
     def snapshot_cam(self, c):
         """Mémorise l'état de la caméra pour la prise en cours (survit à une déconnexion)."""
@@ -790,6 +872,8 @@ class Studio:
         take = safe_name(q.get("take"), "prise")
         ext = "mov" if q.get("ext") == "mov" else "mp4"
         d = os.path.join(self.captures_dir, take)
+        if self.take and self.take.get("kind") == "visage" and self.take["name"] == take:
+            d = self.take["dir"]
         os.makedirs(d, exist_ok=True)
         path = os.path.join(d, f"{cam_name}.{ext}")
         tmp = path + ".part"
@@ -843,8 +927,12 @@ class Studio:
 
     async def run_job(self, job):
         kind, take = job["kind"], job["take"]
-        d = os.path.join(self.captures_dir, take)
-        if kind == "traiter":
+        d = job.get("dir") or os.path.join(self.captures_dir, take)
+        if kind == "visage":
+            cmd = ["visage", d, "--studio", self.studio_dir]
+        elif kind == "visage_perso":
+            cmd = ["visage-perso", self.studio_dir, d, job["args"][0]]
+        elif kind == "traiter":
             cmd = ["traiter", self.studio_dir, d]
         elif kind == "taille":
             cmd = ["taille", d, str(job["args"][0]), "--studio", self.studio_dir]
@@ -861,9 +949,9 @@ class Studio:
         self.proc["pid"] = p.pid
         async for raw in p.stdout:
             line = raw.decode("utf-8", "replace").rstrip()
-            m = re.match(r"\s*(\d)/6 (.+)", line)
+            m = re.match(r"\s*(\d)/([46]) (.+)", line)
             if m:
-                self.proc.update(step=int(m.group(1)), step_label=m.group(2).rstrip("…. "))
+                self.proc.update(step=int(m.group(1)), steps=int(m.group(2)), step_label=m.group(3).rstrip("…. "))
                 self.changed()
             await self.broadcast(dict(type="log", line=line))
         rc = await p.wait()
@@ -871,7 +959,8 @@ class Studio:
         if rc == 0:
             lab = job["label"][:1].lower() + job["label"][1:]     # « animation de Y Bot »
             done = {"traiter": f"Prise {take} traitée", "taille": f"{take} : {lab} terminée",
-                    "animer": f"{take} : {lab} terminée"}[kind]
+                    "animer": f"{take} : {lab} terminée", "visage": f"Visage {take} traité",
+                    "visage_perso": f"{take} : {lab} terminée"}[kind]
             await self.toast(done, "ok")
         else:
             await self.toast(f"Échec : {job['label'].lower()} de {take} (voir le journal dans Prises)", "error")
@@ -925,7 +1014,9 @@ class Studio:
             with open(os.path.join(d, "personnage.json"), "w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=2, ensure_ascii=False)
             # premier personnage, sans personnage fourni (Y Bot) : il devient celui par défaut
-            if not self.cfg().get("character") and not any(c.get("builtin") for c in pipeline.list_characters(self.studio_dir)):
+            if info.get("arkit") and not self.cfg().get("face_character"):
+                self.save_cfg_value("face_character", cid)      # visage : animé après chaque capture
+            if not info.get("face_only") and not self.cfg().get("character") and not any(c.get("builtin") for c in pipeline.list_characters(self.studio_dir)):
                 self.save_cfg_value("character", cid)
             await self.toast(f"Personnage « {meta['name']} » ajouté : squelette {info.get('kind')}, "
                              f"{info.get('mapped')} os reconnus", "ok")
@@ -965,8 +1056,10 @@ class Studio:
             subprocess.Popen(["xdg-open", d], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def delete_take(self, take):
-        """Supprime le dossier d'une prise : corbeille de Windows (récupérable), sinon suppression."""
-        d = os.path.join(self.captures_dir, take)
+        return self.delete_dir(os.path.join(self.captures_dir, take))
+
+    def delete_dir(self, d):
+        """Supprime un dossier : corbeille de Windows (récupérable), sinon suppression."""
         if sys.platform.startswith("win"):
             ps = ("Add-Type -AssemblyName Microsoft.VisualBasic; "
                   "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($env:MOCAM_DEL, "
@@ -978,6 +1071,121 @@ class Studio:
             return "corbeille"
         shutil.rmtree(d)
         return "supprimée"
+
+    # ------------------------------------------------------------------ capture faciale
+    def face_path(self, request):
+        name = safe_name(request.match_info["name"])
+        d = os.path.join(self.faces_dir, name)
+        if not os.path.isdir(d):
+            raise web.HTTPNotFound()
+        return name, d
+
+    async def handle_face_video(self, request):
+        from . import face as facemod
+        _, d = self.face_path(request)
+        v = facemod.find_video(d)
+        if not v:
+            raise web.HTTPNotFound()
+        return web.FileResponse(v)
+
+    async def handle_face_glb(self, request):
+        from . import face as facemod
+        _, d = self.face_path(request)
+        c = request.rel_url.query.get("c", "")
+        p = facemod.character_outputs(d, safe_name(c).lower())[1] if c else facemod.outputs(d)["glb"]
+        if not os.path.exists(p):
+            raise web.HTTPNotFound()
+        return web.FileResponse(p, headers={"Cache-Control": "no-store"})
+
+    async def handle_face_curves(self, request):
+        """Courbes de la prise de visage pour l'interface (sans le maillage appris)."""
+        from . import face as facemod
+        _, d = self.face_path(request)
+        p = facemod.outputs(d)["json"]
+        if not os.path.exists(p):
+            raise web.HTTPNotFound()
+
+        def load():
+            with open(p, encoding="utf-8") as f:
+                data = json.load(f)
+            data.pop("face", None)
+            return data
+        data = await asyncio.get_running_loop().run_in_executor(None, load)
+        return web.json_response(data, headers={"Cache-Control": "no-store"})
+
+    async def handle_face_import(self, request):
+        """POST /visage/import?name=…&filename=… : vidéo d'un visage filmée à part."""
+        from . import face as facemod
+        q = request.rel_url.query
+        fname = os.path.basename(q.get("filename") or "video.mp4")
+        ext = os.path.splitext(fname)[1].lower()
+        if ext not in facemod.VIDEO_EXTS:
+            return web.json_response(dict(ok=False, message="vidéo attendue : MP4, MOV, M4V, AVI, MKV ou WEBM"))
+        name = safe_name(q.get("name") or "", self.next_face_name())
+        d, n = os.path.join(self.faces_dir, name), 2
+        while os.path.exists(d):
+            d, n = os.path.join(self.faces_dir, f"{name}_{n}"), n + 1
+        name = os.path.basename(d)
+        os.makedirs(d)
+        with open(os.path.join(d, "video" + ext), "wb") as f:
+            async for chunk in request.content.iter_chunked(1 << 20):
+                f.write(chunk)
+        facemod.write_meta(d, take=name, kind="visage", created=time.strftime("%Y-%m-%d %H:%M:%S"),
+                           camera="import", source=fname, miroir=False)
+        await self.enqueue_face("visage", name)
+        self.changed()
+        return web.json_response(dict(ok=True, name=name))
+
+    async def on_face_ui(self, a, m):
+        from . import face as facemod
+        name = safe_name(m["name"]) if m.get("name") else ""
+        d = os.path.join(self.faces_dir, name) if name else None
+        if a == "face_facing":
+            c = self.cams.get(m.get("cam"))
+            if c:
+                await self.send(c, dict(t="config", facing="front" if m.get("facing") == "front" else "back"))
+        elif a == "face_record":
+            c = self.cams.get(m.get("cam"))
+            if not c:
+                await self.toast("Choisissez la caméra qui filme le visage", "warn")
+                return
+            await self.start_take(m.get("name") or "", cam_id=c.id, kind="visage")
+        elif a == "face_settings" and d and os.path.isdir(d):
+            kw = {}
+            if m.get("lissage") in facemod.SMOOTH:
+                kw["lissage"] = m["lissage"]
+            if isinstance(m.get("intensite"), (int, float)):
+                kw["intensite"] = int(min(150, max(50, m["intensite"])))
+            if isinstance(m.get("miroir"), bool):
+                kw["miroir"] = m["miroir"]
+            facemod.write_meta(d, **kw)
+            if m.get("apply"):
+                await self.enqueue_face("visage", name)
+            self.changed()
+        elif a == "face_process" and d:
+            await self.enqueue_face("visage", name)
+        elif a == "face_open" and d:
+            self.open_folder(path=d)
+        elif a == "face_delete" and d and os.path.isdir(d):
+            busy = (self.proc and self.proc.get("running") and self.proc.get("take") == name) or \
+                (self.take and self.take.get("name") == name and self.take.get("state") in ("starting", "recording", "stopping"))
+            if busy:
+                await self.toast(f"{name} est en cours : attendez la fin", "warn")
+                return
+            self.queue = [j for j in self.queue if j["take"] != name]
+            how = await asyncio.get_running_loop().run_in_executor(None, self.delete_dir, d)
+            self.changed()
+            await self.toast(f"Visage {name} " + ("mis à la corbeille" if how == "corbeille" else "supprimé"), "ok")
+        elif a == "face_character_default":
+            self.save_cfg_value("face_character", safe_name(m.get("id", "")).lower() if m.get("id") else "")
+            self.changed()
+        elif a == "face_animate" and d:
+            cid = safe_name(m.get("id", "")).lower()
+            ch = pipeline.get_character(self.studio_dir, cid)
+            if not ch:
+                await self.toast("Choisissez un personnage", "warn")
+                return
+            await self.enqueue_face("visage_perso", name, [cid], label=f"Visage sur {ch.get('name', cid)}")
 
     async def handle_ui(self, request):
         ws = web.WebSocketResponse(heartbeat=20)
@@ -1054,6 +1262,8 @@ class Studio:
         elif a == "cancel_queue":
             self.queue = [j for j in self.queue if j["take"] != m.get("take")]
             self.changed()
+        elif a and a.startswith("face_"):
+            await self.on_face_ui(a, m)
         elif a == "open":
             self.open_folder(m.get("take"))
         elif a == "take_delete":
@@ -1185,6 +1395,10 @@ class Studio:
     def app(self):
         app = web.Application(client_max_size=8 * 1024 ** 3)
         app.router.add_get("/", self.handle_index)
+        app.router.add_get("/visage/{name}/video", self.handle_face_video)
+        app.router.add_get("/visage/{name}/apercu.glb", self.handle_face_glb)
+        app.router.add_get("/visage/{name}/courbes.json", self.handle_face_curves)
+        app.router.add_post("/visage/import", self.handle_face_import)
         app.router.add_get("/version", self.handle_version)
         app.router.add_get("/ws/ui", self.handle_ui)
         app.router.add_get("/ws/phone", self.handle_phone)
@@ -1251,6 +1465,8 @@ def make_shortcuts():
 
 def _port_free(port):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    if not sys.platform.startswith("win"):     # connexions en TIME_WAIT : le port reste libre
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         s.bind(("0.0.0.0", port))
         return True
@@ -1319,7 +1535,9 @@ def run(studio_dir, captures_dir, port=8765, open_ui=True):
             if open_ui:
                 open_window(url)
             return
-        if other and _stop_old_studio(port):
+        if other is None:
+            pass        # rien ne répond (port en cours de libération) : on tente de démarrer
+        elif _stop_old_studio(port):
             print(f"Un MOCAM Studio d'une autre version ({other}) tournait encore : il a été fermé "
                   "et remplacé par celui-ci. Vous pouvez fermer son ancienne fenêtre noire.")
         else:

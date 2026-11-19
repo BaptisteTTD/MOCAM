@@ -16,7 +16,7 @@ MOCAM, c'est trois choses :
 | | |
 |---|---|
 | **L'app MOCAM** (iPhone et Android) | Transforme chaque téléphone en caméra pilotée par le PC. |
-| **MOCAM Studio** (PC Windows) | Connecte les téléphones, lance l'enregistrement, traite les prises et montre le résultat en 3D sur votre personnage. |
+| **MOCAM Studio** (PC Windows) | Connecte les téléphones, lance l'enregistrement, traite les prises et montre le résultat en 3D sur votre personnage. Capture aussi le visage (52 blendshapes ARKit) avec une seule caméra. |
 | **L'add-on Blender** et **le script 3ds Max** | Transfèrent l'animation sur vos propres personnages, dans vos logiciels. |
 
 Ce que vous obtenez pour chaque prise :
@@ -30,8 +30,9 @@ Ce que vous obtenez pour chaque prise :
 2. [Installation](#2-installation)
 3. [Préparer la pièce](#3-préparer-la-pièce)
 4. [Tutoriel : MOCAM Studio pas à pas](#4-tutoriel--mocam-studio-pas-à-pas)
-5. [Utiliser l'animation](#5-utiliser-lanimation)
-6. [Dépannage](#6-dépannage)
+5. [Capture du visage](#5-capture-du-visage)
+6. [Utiliser l'animation](#6-utiliser-lanimation)
+7. [Dépannage](#7-dépannage)
 
 ---
 
@@ -249,7 +250,55 @@ ajoutée.
 
 ---
 
-## 5. Utiliser l'animation
+## 5. Capture du visage
+
+L'onglet **Visage** enregistre les expressions du visage avec **une seule caméra** et les
+exporte en **52 blendshapes ARKit** (le standard d'Apple, reconnu par Unreal, Unity, Blender,
+Character Creator, MetaHuman…), plus la rotation de la tête.
+
+![Onglet Visage : visage 3D et les 52 blendshapes](docs/tuto/11_visage.png)
+
+**Filmer** : dans *Nouvelle capture du visage*, choisissez le téléphone, cliquez **Avant** pour
+passer sur sa caméra avant (vous vous voyez pendant la prise), puis **Enregistrer le visage**
+et **Arrêter**. Ou cliquez **Importer une vidéo…** (ou glissez-la sur l'onglet) : n'importe
+quelle vidéo de visage, filmée avec l'appareil photo du téléphone par exemple.
+
+Pour la meilleure qualité :
+* le visage **de face**, à 40–70 cm, et qui remplit bien l'image ;
+* une lumière **douce et de face** (pas de contre-jour, pas d'ombre forte d'un côté) ;
+* rien devant la bouche ou les yeux ; des lunettes réduisent la précision du regard ;
+* gardez **quelques secondes de visage neutre** dans la prise (au début, par exemple) : MOCAM
+  s'en sert pour régler le repos de chaque expression.
+
+**Traiter** : c'est automatique dès que la vidéo arrive (moins d'une minute pour 20 s de vidéo).
+MOCAM suit 478 points du visage image par image, mesure les paupières pour des clignements
+nets, ramène chaque expression au repos à 0, puis lisse les courbes sans retard (les sourcils
+plus fort, les paupières et la mâchoire moins, pour garder les mouvements rapides).
+
+**Vérifier** : la vidéo et le visage 3D sont synchronisés, les barres montrent chaque
+blendshape à l'instant affiché. Les **Réglages** s'appliquent en quelques secondes sans
+refaire le suivi :
+* *Lissage* : faible (plus de détails), moyen, fort (très doux) ;
+* *Intensité* : de 50 à 150 %, pour adoucir ou accentuer toutes les expressions ;
+* *Vidéo en miroir* : à cocher si la vidéo est inversée comme dans un miroir (gauche et
+  droite échangées).
+
+**Les fichiers** (dans `visages\visage_XXX\`) :
+
+| Fichier | Contenu |
+|---|---|
+| `visage_XXX.fbx` | un visage animé avec ses 52 blendshapes ARKit et un os de tête |
+| `visage_XXX.csv` | les courbes au format **Live Link Face** (Epic Games) : import direct dans Unreal ou les add-ons Blender qui lisent ce format |
+| `visage_XXX_<personnage>.fbx` | votre personnage, ses blendshapes animées |
+
+**Sur votre personnage** : importez-le dans l'onglet *Personnages* ; il doit avoir des
+blendshapes aux noms ARKit (`eyeBlinkLeft`, `jawOpen`… ; les variantes `EyeBlink_L` ou
+`A25_Jaw_Open` de Character Creator sont reconnues). Une tête seule, sans squelette, est
+acceptée. Dans l'onglet *Visage*, choisissez-le dans *Personnage à blendshapes* et cliquez
+**Animer**, ou cochez *Animer ce personnage après chaque capture*. Si son squelette a un os de
+tête, il tourne aussi.
+
+## 6. Utiliser l'animation
 
 ### Les fichiers
 
@@ -292,7 +341,7 @@ Le Biped garde sa morphologie ; effacez ses pas avant le transfert.
 
 ---
 
-## 6. Dépannage
+## 7. Dépannage
 
 | Problème | Solution |
 |---|---|
@@ -306,10 +355,14 @@ Le Biped garde sa morphologie ; effacez ses pas avant le transfert.
 | Un bras ou une jambe qui « saute » | Le membre était caché pour une caméra : orientez l'action face aux caméras, ou ajoutez un 3ᵉ téléphone. |
 | Personnage refusé | Il faut un squelette humanoïde (bassin, colonne, cou, tête, bras, jambes). Studio indique les os qu'il n'a pas reconnus. |
 | « Blender introuvable » | Installez Blender depuis blender.org. |
+| Visage : « aucun visage trouvé » | Cadrez le visage de face, plus près, avec plus de lumière. |
+| Visage : gauche et droite inversées | Cochez *Vidéo en miroir* dans les réglages du visage. |
 | L'app iPhone ne s'ouvre plus | Les 7 jours sont passés : réinstallez-la avec Sideloadly. |
 
 ---
 
 <sub>Pour les développeurs : le code de l'app est dans `mobile\MocapCamPhone` (Expo,
 VisionCamera), le dialogue PC ↔ téléphones est décrit dans `mobile\MocapCamPhone\PROTOCOLE.md`,
-et les tests sont dans `tests\` (`test_synthetique.py`, `test_studio.py`).</sub>
+et les tests sont dans `tests\` (`test_synthetique.py`, `test_studio.py`, `test_visage.py`).
+La capture du visage utilise MediaPipe Face Landmarker de Google (licence Apache 2.0), installé
+et téléchargé automatiquement au premier usage.</sub>
