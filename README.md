@@ -5,14 +5,14 @@
   </picture>
 </p>
 
-<p align="center"><b>La motion capture avec deux téléphones.</b><br>
+<p align="center"><b>La motion capture avec deux téléphones ou plus.</b><br>
 Corps et doigts, sans marqueurs sur l'acteur, jusqu'à votre personnage 3D.</p>
 
 ---
 
 ## Ce que fait MOCAM
 
-Vous filmez un acteur avec deux téléphones posés sur trépied. MOCAM en tire une animation 3D
+Vous filmez un acteur avec deux téléphones ou plus, posés sur trépied. MOCAM en tire une animation 3D
 complète (corps, mains et doigts) et la livre en **FBX**, prête pour Blender, Unity, Unreal ou
 3ds Max.
 
@@ -43,7 +43,7 @@ Ce que vous obtenez pour chaque prise :
 ## 1. Ce qu'il vous faut
 
 * **Un PC Windows** avec Python 3.11 ou 3.12 et **Blender** (gratuit, blender.org).
-* **Deux téléphones** récents (testé avec un iPhone 12 Pro et un Poco X3 NFC) et deux trépieds.
+* **Deux téléphones ou plus**, récents (testé avec un iPhone 12 Pro et un Poco X3 NFC), un trépied par téléphone.
 * **Cinq demi-boules** de couleur vive et mate : 2 rouges, 1 verte, 1 bleue, 1 jaune.
 * Un réseau commun : le Wi-Fi de la maison, ou le partage de connexion d'un téléphone.
 
@@ -112,9 +112,11 @@ en **carré**, de 1,5 à 3 m de côté selon la pièce, plus une boule au milieu
 ### Les caméras
 
 * Trépieds à **1,2–1,5 m** de haut, à **3–4 m** du centre de la zone.
-* Les deux téléphones **devant l'acteur**, écartés de **70 à 90°**.
+* Avec deux téléphones : **devant l'acteur**, écartés de **70 à 90°**. Avec plus de
+  téléphones, répartissez-les en arc autour de la zone : chaque caméra en plus réduit les
+  membres cachés.
 * Tout le corps dans le cadre, **bras levés compris**, et les boules visibles.
-* Avec deux caméras, gardez les **mains tournées vers les caméras** : une main cachée derrière
+* Gardez les **mains tournées vers les caméras** : une main cachée derrière
   le corps ne peut pas être reconstruite.
 
 Il n'y a rien à régler sur les téléphones : l'app impose elle-même 60 images/s, coupe la
@@ -135,7 +137,7 @@ puis l'interface.
 
 ![Écran de connexion avec le QR code](docs/tuto/01_connexion.png)
 
-1. Mettez le PC et les deux téléphones **sur le même réseau** : votre Wi-Fi, ou le partage de
+1. Mettez le PC et les téléphones **sur le même réseau** : votre Wi-Fi, ou le partage de
    connexion d'un des téléphones (celui-ci peut filmer lui aussi). Le point d'accès mobile du PC
    marche aussi.
 2. Sur chaque téléphone, ouvrez l'app **MOCAM**, donnez un nom à la caméra (`iphone`, `poco`…)
@@ -186,7 +188,7 @@ Tout doit être au vert :
 
 ### Étape 5 : enregistrer
 
-Cliquez **● Enregistrer**. Les deux téléphones démarrent ensemble, puis le PC émet un **bip**
+Cliquez **● Enregistrer**. Tous les téléphones démarrent ensemble, puis le PC émet un **bip**
 qui les synchronise à la milliseconde : gardez le son du PC allumé. Pas besoin de clap.
 
 ![Enregistrement en cours](docs/tuto/06_enregistrement.png)
@@ -208,7 +210,7 @@ pouvez filmer d'autres prises pendant ce temps : elles attendent leur tour.
 
 ![Prise traitée, aperçu 3D sur Y Bot](docs/tuto/08_prise_traitee.png)
 
-* L'**aperçu 3D** montre l'animation sur **Y Bot**, ou sur le **Squelette** de l'acteur (bouton
+* L'**aperçu 3D** montre l'animation sur **Y Bot** (ou sur vos personnages animés, bouton
   *Afficher*). Lecture, pause, et image par image avec le curseur. Tournez autour à la souris.
 * **Taille de l'acteur** : une erreur ? Tapez la bonne taille, puis **Appliquer**. C'est
   immédiat, sans retraiter : les FBX sont refaits.

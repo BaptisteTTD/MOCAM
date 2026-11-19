@@ -226,13 +226,12 @@ async def main():
                 ok("ancienne version du serveur signalée", "relancé" in fatal_txt, fatal_txt.splitlines()[0] if fatal_txt else "rien d'affiché")
                 await page.reload()
                 await page.wait_for_timeout(800)
-                # rig Mixamo fourni : carte « Sortie par défaut » dans Personnages
+                # sans personnage : une indication, plus de mannequin de remplacement
                 await page.locator(".tab", has_text="Personnages").click()
                 await page.wait_for_timeout(1500)
-                card = await page.locator(".char").first.inner_text()
-                thumb = await page.locator(".char .thumb img").count()
-                ok("rig Mixamo par défaut dans Personnages", "Rig Mixamo" in card and "Sortie par défaut" in card and thumb >= 1,
-                   card.replace("\n", " | ")[:110])
+                grid = await page.locator("#charGrid").inner_text()
+                ok("Personnages vide : indication claire", "Aucun personnage" in grid and await page.locator(".char").count() == 0,
+                   grid.replace("\n", " | ")[:110])
                 await page.screenshot(path=os.path.join(D, "studio_personnages.png"))
                 await page.locator(".tab", has_text="Tournage").click()
                 phones = [FakePhone("iphone", 0, 123456.0, 15, crash_after_upload=True), FakePhone("poco", 1, -98765.0, 40)]

@@ -35,7 +35,7 @@ from . import fbx, markers as mk, pipeline, sync
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "studio_ui")
 # version du serveur : l'interface (index.html) vérifie qu'elle parle au serveur de la même version
-STUDIO_VERSION = "1.4.0"
+STUDIO_VERSION = "1.4.1"
 
 # horloge du PC en ms (monotone, calée sur l'heure système au démarrage)
 _EPOCH = time.time() * 1000 - time.monotonic() * 1000
@@ -254,7 +254,6 @@ class Studio:
         self.net = dict(hosts=lan_addresses(), ssid=None, public=False, firewall_rule=None, adapters=[])
         self.queue = []             # traitements en attente
         self.char_busy = None       # import de personnage en cours
-        self.rig_locks = {}         # aperçus « rig Mixamo » en cours de création, par prise
         self.has_blender = bool(fbx.find_blender(self.cfg().get("blender") or None))
 
     def _fov_path(self):
@@ -954,61 +953,6 @@ class Studio:
             raise web.HTTPNotFound()
         return web.FileResponse(p, headers={"Cache-Control": "no-store"})
 
-    async def handle_take_rig(self, request):
-        """Rig Mixamo animé de la prise, avec le mannequin (GLB) ; créé à la demande pour les
-        prises traitées avant MOCAM Studio 1.2."""
-        take = safe_name(request.match_info["take"])
-        tdir = os.path.join(self.captures_dir, take)
-        src = os.path.join(tdir, "mocapcam", f"{take}.mocap.json")
-        p = pipeline.rig_preview_path(tdir)
-        fresh = os.path.exists(p) and (not os.path.exists(src) or os.path.getmtime(p) >= os.path.getmtime(src) - 1)
-        if not fresh:
-            if not os.path.exists(src) or not self.has_blender:
-                raise web.HTTPNotFound()
-            lock = self.rig_locks.setdefault(take, asyncio.Lock())
-            async with lock:
-                if not (os.path.exists(p) and os.path.getmtime(p) >= os.path.getmtime(src) - 1):
-                    logs = []
-                    rep = await asyncio.get_running_loop().run_in_executor(
-                        None, lambda: fbx.rig_preview(src, p, self.cfg().get("blender") or None, logs.append))
-                    if not rep or not os.path.exists(p):
-                        return web.Response(status=500, text=" ".join(x.strip() for x in logs)[-300:] or "aperçu non créé")
-        return web.FileResponse(p, headers={"Cache-Control": "no-store"})
-
-    async def handle_rig_mixamo(self, request):
-        return web.FileResponse(os.path.join(UI_DIR, "rig_mixamo.glb"), headers={"Cache-Control": "max-age=3600"})
-
-    async def handle_take_skeleton(self, request):
-        """Squelette de la prise pour l'aperçu 3D : points du corps et des mains, 30 i/s."""
-        take = safe_name(request.match_info["take"])
-        d = os.path.join(self.captures_dir, take, "mocapcam")
-        src = os.path.join(d, f"{take}.mocap.json")
-        cache = os.path.join(d, "apercu_squelette.json")
-        if not os.path.exists(src):
-            raise web.HTTPNotFound()
-        if not os.path.exists(cache) or os.path.getmtime(cache) < os.path.getmtime(src):
-            def build():
-                with open(src, encoding="utf-8") as f:
-                    data = json.load(f)
-                fps = float(data["fps"])
-                step = max(1, int(round(fps / 30)))
-                keep = list(range(23)) + list(range(91, 133))
-                frames = []
-                for fr in data["positions"][::step]:
-                    frames.append([None if fr[i] is None else [round(v, 3) for v in fr[i]] for i in keep])
-                out = dict(fps=fps / step, joints=[data["joint_names"][i] for i in keep], frames=frames,
-                           height_m=(data.get("stats") or {}).get("actor_height_m"))
-                with open(cache, "w", encoding="utf-8") as f:
-                    json.dump(out, f, separators=(",", ":"))
-            await asyncio.get_running_loop().run_in_executor(None, build)
-        return web.FileResponse(cache, headers={"Cache-Control": "no-store"})
-
-    def open_folder(self, take=None, path=None):
-        d = path or (os.path.join(self.captures_dir, safe_name(take)) if take else self.captures_dir)
-        if hasattr(os, "startfile") and os.path.isdir(d):
-            os.startfile(d)  # noqa: S606 (Windows)
-
-    # ------------------------------------------------------------------ interface
     async def handle_ui(self, request):
         ws = web.WebSocketResponse(heartbeat=20)
         await ws.prepare(request)
@@ -1207,9 +1151,6 @@ class Studio:
         app.router.add_post("/character", self.handle_character_upload)
         app.router.add_get("/character/{cid}/apercu.glb", self.handle_character_glb)
         app.router.add_get("/take/{take}/apercu.glb", self.handle_take_glb)
-        app.router.add_get("/take/{take}/squelette.json", self.handle_take_skeleton)
-        app.router.add_get("/take/{take}/rig.glb", self.handle_take_rig)
-        app.router.add_get("/rig_mixamo.glb", self.handle_rig_mixamo)
         for img in ("logo-mocam.png", "favicon.png"):
             app.router.add_get("/" + img, lambda r, img=img: web.FileResponse(
                 os.path.join(UI_DIR, img), headers={"Cache-Control": "max-age=3600"}))

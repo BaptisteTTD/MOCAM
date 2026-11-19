@@ -307,7 +307,7 @@
 <script>
 let ws, S = null, serverDelta = 0, takeTyped = false, selTake = null, logText = '';
 const autoAnimated = new Set();   // prises où le personnage par défaut a été lancé automatiquement
-const UI_VERSION = '1.4.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
+const UI_VERSION = '1.4.1';   // doit correspondre à STUDIO_VERSION (studio_server.py)
 function newerVersion(a, b) {
   const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
   for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
@@ -596,9 +596,9 @@ function renderTakeDetail(force) {
   if (!t) { box.innerHTML = '<div class="empty-page">Les prises filmées apparaissent ici.</div>'; return; }
   const chars = S.characters;
   const animated = chars.filter(c => t.characters.includes(c.id));
-  // personnage par défaut en premier, le squelette de l'acteur en dernier
+  // personnage par défaut en premier
   animated.sort((a, b) => (b.id === S.character) - (a.id === S.character));
-  const sources = animated.map(c => ({ id: c.id, label: c.name })).concat([{ id: '', label: 'Squelette' }]);
+  const sources = animated.map(c => ({ id: c.id, label: c.name }));
   const wantSrc = animated.length ? animated[0].id : '';
   if (viewerSel == null || viewerSel.take !== t.name || !sources.some(s => s.id === viewerSel.id) || (viewerSel.auto && viewerSel.id !== wantSrc))
     viewerSel = { take: t.name, id: wantSrc, auto: true };
@@ -619,13 +619,13 @@ function renderTakeDetail(force) {
     </div>
     <div class="grid2">
       <div class="panel">
-        <div class="viewer" id="viewerBox" data-take="${esc(t.name)}" data-src="${esc(viewerSel.id)}"><div class="empty" id="viewerEmpty">${t.preview ? 'Chargement de l\'aperçu…' : 'L\'aperçu 3D apparaît une fois la prise traitée.'}</div></div>
-        <div class="player" id="playerBar" style="${t.preview ? '' : 'display:none'}">
+        <div class="viewer" id="viewerBox" data-take="${esc(t.name)}" data-src="${esc(viewerSel.id)}"><div class="empty" id="viewerEmpty">${!t.preview ? 'L\'aperçu 3D apparaît une fois la prise traitée.' : sources.length ? 'Chargement de l\'aperçu…' : defMissing && (busy || S.blender) ? `${esc(defChar.name)} en préparation…` : 'Aucun personnage animé sur cette prise : choisissez-en un dans Animer un personnage.'}</div></div>
+        <div class="player" id="playerBar" style="${t.preview && sources.length ? '' : 'display:none'}">
           <button class="btn small" id="vPlay">Pause</button>
           <input type="range" id="vScrub" min="0" max="1000" value="0" aria-label="Position dans la prise">
           <span class="time" id="vTime"></span>
         </div>
-        ${t.preview ? `<div class="row" style="align-items:center"><span class="hint">Afficher</span><span class="seg">${sources.map(s => `<button aria-pressed="${s.id === viewerSel.id}" onclick="pickViewer('${esc(t.name)}','${esc(s.id)}')">${esc(s.label)}</button>`).join('')}</span>${defMissing && busy ? `<span class="hint">${esc(defChar.name)} en préparation…</span>` : ''}</div>` : ''}
+        ${t.preview && sources.length > 1 ? `<div class="row" style="align-items:center"><span class="hint">Afficher</span><span class="seg">${sources.map(s => `<button aria-pressed="${s.id === viewerSel.id}" onclick="pickViewer('${esc(t.name)}','${esc(s.id)}')">${esc(s.label)}</button>`).join('')}</span>${defMissing && busy ? `<span class="hint">${esc(defChar.name)} en préparation…</span>` : ''}</div>` : ''}
       </div>
       <div style="display:grid;gap:18px">
         <div class="panel">
@@ -666,7 +666,7 @@ function renderTakeDetail(force) {
   // l'aperçu 3D déjà affiché pour cette prise est gardé tel quel (pas de rechargement)
   const nb = $('viewerBox');
   if (oldBox && nb && oldBox.dataset.take === nb.dataset.take && oldBox.dataset.src === nb.dataset.src && oldBox.querySelector('canvas')) nb.replaceWith(oldBox);
-  window.mcViewer.show(t.preview ? viewerSel : null);
+  window.mcViewer.show(t.preview && viewerSel.id ? viewerSel : null);
 }
 function applyTakeHeight(take) {
   const v = +$('takeH').value;
@@ -693,17 +693,7 @@ function renderChars() {
   charsKey = key;
   // personnage par défaut d'abord (Y Bot fourni), puis les fournis, puis les autres
   const chars = [...S.characters].sort((a, b) => (b.id === S.character) - (a.id === S.character) || (!!b.builtin) - (!!a.builtin));
-  // sans aucun personnage : le rig Mixamo seul, habillé du mannequin
-  const rigCard = chars.length ? '' : `<article class="char def">
-      <div class="thumb" data-thumb="__rig">Aperçu…</div>
-      <div class="body">
-        <div class="nm">Rig Mixamo</div>
-        <div class="meta">65 os Mixamo, corps et doigts, mannequin pour l'aperçu</div>
-        <div class="meta">Toujours exporté : prise_XXX.fbx, à la taille de l'acteur</div>
-        <div class="acts"><span class="ok-t" style="font-size:13px">Sortie par défaut</span></div>
-      </div>
-    </article>`;
-  $('charGrid').innerHTML = rigCard + chars.map(c => {
+  $('charGrid').innerHTML = (chars.length ? '' : '<p class="hint">Aucun personnage : importez un modèle riggé ci-dessus. Le squelette seul (prise_XXX.fbx) est exporté dans tous les cas.</p>') + chars.map(c => {
     const i = c.info || {};
     const def = c.id === S.character;
     return `<article class="char ${def ? 'def' : ''}">
@@ -856,27 +846,6 @@ function applyTime() {
     S.dots.instanceMatrix.needsUpdate = true;
   }
 }
-async function showSkeleton(take, key) {
-  const r = await fetch(`/take/${encodeURIComponent(take)}/squelette.json`);
-  if (!r.ok) throw new Error('aperçu indisponible');
-  const d = await r.json();
-  if (key && V.key !== key) return;
-  clearContent();
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(PAIRS.length * 6), 3));
-  const line = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xe9ecf2 }));
-  line.frustumCulled = false; line.userData.content = true;
-  const dots = new THREE.InstancedMesh(new THREE.SphereGeometry(0.022, 12, 8), new THREE.MeshStandardMaterial({ color: 0x4f80f4, roughness: .5 }), 23);
-  dots.frustumCulled = false; dots.userData.content = true;
-  V.scene.add(line, dots);
-  V.sk = { frames: d.frames, fps: d.fps, line, dots };
-  V.dur = d.frames.length / d.fps; V.t = 0;
-  // cadrage sur la zone parcourue
-  const pts = [];
-  for (let i = 0; i < d.frames.length; i += Math.max(1, Math.floor(d.frames.length / 60))) for (const p of d.frames[i]) if (p) pts.push(new THREE.Vector3(p[0], p[2], -p[1]));
-  const bb = new THREE.Box3().setFromPoints(pts);
-  frame(bb.getCenter(new THREE.Vector3()), Math.max(1.2, bb.getSize(new THREE.Vector3()).length() * 0.6));
-}
 async function showGlb(url, animated, key) {
   const g = await new GLTFLoader().loadAsync(url);
   if (key && V.key !== key) return;
@@ -906,13 +875,7 @@ window.mcViewer = {
     V.key = key;
     const empty = document.getElementById('viewerEmpty');
     try {
-      if (sel.id) await showGlb(`/take/${encodeURIComponent(sel.take)}/apercu.glb?c=${encodeURIComponent(sel.id)}&t=${Date.now()}`, true, key);
-      else {
-        if (empty) empty.textContent = 'Préparation du rig Mixamo animé…';
-        // rig Mixamo + mannequin ; sans Blender (ou en cas d'échec) : points du squelette
-        try { await showGlb(`/take/${encodeURIComponent(sel.take)}/rig.glb?t=${Date.now()}`, true, key); }
-        catch (e) { if (V.key === key) await showSkeleton(sel.take, key); }
-      }
+      await showGlb(`/take/${encodeURIComponent(sel.take)}/apercu.glb?c=${encodeURIComponent(sel.id)}&t=${Date.now()}`, true, key);
       if (V.key !== key) return;
       if (empty) empty.remove();
     } catch (e) { if (empty) empty.textContent = 'Aperçu indisponible : ' + e.message; }
@@ -933,7 +896,7 @@ async function renderThumb(el) {
     const sc = new THREE.Scene();
     sc.add(new THREE.HemisphereLight(0xdde6ff, 0x30333a, 2.4));
     const sun = new THREE.DirectionalLight(0xffffff, 2.2); sun.position.set(2, 4, 3); sc.add(sun);
-    const g = await new GLTFLoader().loadAsync(id === '__rig' ? '/rig_mixamo.glb' : `/character/${encodeURIComponent(id)}/apercu.glb?t=${Date.now()}`);
+    const g = await new GLTFLoader().loadAsync(`/character/${encodeURIComponent(id)}/apercu.glb?t=${Date.now()}`);
     sc.add(g.scene);
     const bb = new THREE.Box3().setFromObject(g.scene), c = bb.getCenter(new THREE.Vector3()), s = bb.getSize(new THREE.Vector3());
     const cam = new THREE.PerspectiveCamera(30, 1, 0.01, 1000);
