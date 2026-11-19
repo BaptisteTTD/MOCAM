@@ -272,7 +272,7 @@ def scale_world(X, cams, vol, s):
 
 
 def load_take_meta(take_dir):
-    """Métadonnées écrites par MocapCam Studio (take.json), ou None pour une prise manuelle."""
+    """Métadonnées écrites par MOCAM Studio (take.json), ou None pour une prise manuelle."""
     path = os.path.join(take_dir, "take.json")
     if not os.path.exists(path):
         return None
@@ -285,7 +285,7 @@ def compute_delays(norm_videos, manual=None, take_meta=None, log=print):
     manual = manual or {}
     audio = {n: video.read_audio(norm_videos[n]) for n in names}
 
-    # 1) prise lancée par MocapCam Studio : bips joués par le PC (départ, et arrêt)
+    # 1) prise lancée par MOCAM Studio : bips joués par le PC (départ, et arrêt)
     chirps = (take_meta or {}).get("chirps_at_pc") or (
         [take_meta["chirp_at_pc"]] if take_meta and take_meta.get("chirp_at_pc") else [])
     if chirps and not manual:
@@ -582,7 +582,7 @@ def process_take(studio_dir, take_dir, force=False, manual_delays=None, only_cal
     work = os.path.join(take_dir, "mocapcam")
     os.makedirs(work, exist_ok=True)
     meta = load_take_meta(take_dir)
-    if meta:   # prise MocapCam Studio : les caméras sont celles de la prise
+    if meta:   # prise MOCAM Studio : les caméras sont celles de la prise
         names = [n for n, c in meta["cameras"].items() if c.get("file")]
     else:
         names = cfg["cameras"]
@@ -674,7 +674,7 @@ def process_take(studio_dir, take_dir, force=False, manual_delays=None, only_cal
         log(f"  taille de l'acteur mesurée : {h * 100:.0f} cm (aucune taille indiquée)")
         if not 1.35 <= h <= 2.15:
             log("  ATTENTION : taille peu plausible. Indiquez la taille de l'acteur en cm dans "
-                "MocapCam Studio : le squelette sera mis à la bonne taille.")
+                "MOCAM Studio : le squelette sera mis à la bonne taille.")
     stats["actor_height_m"] = h
     name = os.path.basename(os.path.normpath(take_dir))
     # points 3D bruts : données de travail (dans mocapcam/), d'où est tiré le FBX

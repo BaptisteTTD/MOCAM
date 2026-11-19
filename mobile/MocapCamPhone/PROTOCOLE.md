@@ -1,4 +1,4 @@
-# Protocole MocapCam Studio <-> téléphones
+# Protocole MOCAM Studio <-> téléphones
 
 Transport : WebSocket `ws://<pc>:<port>/ws/phone` + HTTP pour l'envoi des vidéos.
 

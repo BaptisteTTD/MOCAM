@@ -531,7 +531,7 @@ def test_default_character():
 
 
 def test_transfer(path):
-    """Retarget armature -> armature : FBX MocapCam importé -> personnage Mixamo en A-pose,
+    """Retarget armature -> armature : FBX MOCAM importé -> personnage Mixamo en A-pose,
     échelle 0,01, tourné de 90°, plus petit (comme un perso téléchargé sur Mixamo)."""
     import bpy
     import mathutils
@@ -627,7 +627,7 @@ def _rig_names(kind):
 def test_rigs(path):
     """Personnages aux squelettes d'autres logiciels (Unreal, Biped 3ds Max, Character Creator) :
     os reconnus, retarget correct ; puis fichier personnage (maillage + squelette) -> FBX animé
-    + aperçu GLB, comme MocapCam Studio le fait sans interface."""
+    + aperçu GLB, comme MOCAM Studio le fait sans interface."""
     import bpy
     import mathutils
     import mocapcam_blender as mb

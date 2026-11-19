@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-echo === Installation de MocapCam ===
+echo === Installation de MOCAM ===
 where py >nul 2>nul
 if errorlevel 1 (
   echo Python est introuvable. Installez Python 3.11 ou 3.12 depuis https://www.python.org

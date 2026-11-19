@@ -1,10 +1,10 @@
 bl_info = {
-    "name": "MocapCam",
-    "author": "MocapCam",
+    "name": "MOCAM",
+    "author": "MOCAM",
     "version": (0, 4, 1),
     "blender": (3, 6, 0),
-    "location": "Vue 3D > barre latérale (N) > MocapCam  |  Fichier > Importer > Animation MocapCam (.fbx)",
-    "description": "Importe une animation MocapCam (FBX, squelette Mixamo) et la transfère (retarget) "
+    "location": "Vue 3D > barre latérale (N) > MOCAM  |  Fichier > Importer > Animation MOCAM (.fbx)",
+    "description": "Importe une animation MOCAM (FBX, squelette Mixamo) et la transfère (retarget) "
                    "sur un personnage riggé (Mixamo, Unreal, Character Creator, Biped, DAZ, VRoid, Rigify)",
     "category": "Animation",
 }
@@ -941,7 +941,7 @@ def create_mixamo_armature(context, J, name="MocapCam_Squelette", obj_matrix=Non
 
 def armature_motion(context, src, frame_start, frame_end, with_twist=False):
     """Points équivalents à une capture (épaules, coudes, doigts…), image par image, depuis une
-    armature animée aux noms Mixamo (ex. un FBX MocapCam importé).
+    armature animée aux noms Mixamo (ex. un FBX MOCAM importé).
     with_twist=True : renvoie aussi, pour chaque os, sa référence de torsion de repos tournée
     avec l'os ; elle reste solidaire de l'os, donc jamais parallèle à lui (pas de bascule)."""
     bmap = bone_map(src)
@@ -1037,7 +1037,7 @@ def _fmt_fps(v):
 
 
 def _key_rest_pose(obj, frame):
-    """Pose de repos (T-pose pour le squelette MocapCam) clé à `frame`, juste avant
+    """Pose de repos (T-pose pour le squelette MOCAM) clé à `frame`, juste avant
     l'animation. Le FBX écrit la position par défaut de chaque os à l'image courante :
     en se plaçant sur cette image, la pose de repos du fichier est la T-pose, et
     l'animation exportée (frame_start..frame_end) n'est pas modifiée."""
@@ -1065,7 +1065,7 @@ def export_fbx(context, obj, filepath, rest_frame=True, meshes=()):
     """Exporte l'armature et son animation en FBX, comme une animation Mixamo
     « sans skin » : os 'mixamorig:', Y vers le haut, personnage face à +Z, sans os de bout
     ajoutés, toutes les images gardées (pas de simplification). La pose de repos du fichier
-    est celle de l'armature (T-pose pour le squelette MocapCam).
+    est celle de l'armature (T-pose pour le squelette MOCAM).
     meshes : maillages du personnage à exporter avec (textures intégrées au FBX)."""
     if context.mode != "OBJECT":
         bpy.ops.object.mode_set(mode="OBJECT")
@@ -1117,7 +1117,7 @@ def export_fbx(context, obj, filepath, rest_frame=True, meshes=()):
 
 def capture_to_fbx(src, dst, root_mode="RELATIVE", glb_path=None):
     """Sans interface (blender -b) : capture .mocap.json -> FBX d'un squelette Mixamo animé.
-    glb_path : aperçu 3D pour MocapCam Studio (rig Mixamo animé avec le mannequin par défaut).
+    glb_path : aperçu 3D pour MOCAM Studio (rig Mixamo animé avec le mannequin par défaut).
     dst vide : seulement l'aperçu."""
     bpy.ops.wm.read_factory_settings(use_empty=True)
     context = bpy.context
@@ -1201,7 +1201,7 @@ def character_info(arm, meshes):
 
 
 def export_glb(context, objs, filepath, animated=True):
-    """GLB pour l'aperçu 3D de MocapCam Studio (navigateur)."""
+    """GLB pour l'aperçu 3D de MOCAM Studio (navigateur)."""
     for o in context.view_layer.objects:
         o.select_set(False)
     for o in objs:
@@ -1218,7 +1218,7 @@ def export_glb(context, objs, filepath, animated=True):
 
 
 # --------------------------------------------------------------------------- mannequin du rig Mixamo
-# Corps simple (segments rigides, articulations en bleu) posé sur le rig Mixamo de MocapCam :
+# Corps simple (segments rigides, articulations en bleu) posé sur le rig Mixamo de MOCAM :
 # c'est le « personnage » par défaut, quand aucun personnage riggé n'est importé.
 
 MANNEQUIN_NAME = "MocapCam_Mannequin"
@@ -1327,7 +1327,7 @@ def _mannequin_material(name, rgba):
 
 
 def build_mannequin(arm, name=MANNEQUIN_NAME):
-    """Maillage de mannequin skinné sur un rig aux noms Mixamo (celui de MocapCam).
+    """Maillage de mannequin skinné sur un rig aux noms Mixamo (celui de MOCAM).
     Renvoie l'objet maillage (enfant de l'armature, modificateur Armature)."""
     bones = arm.data.bones
 
@@ -1460,7 +1460,7 @@ def _neutral_joints():
 
 
 def mannequin_file(glb_path):
-    """GLB du rig Mixamo par défaut avec son mannequin, en T-pose (vignette de MocapCam Studio)."""
+    """GLB du rig Mixamo par défaut avec son mannequin, en T-pose (vignette de MOCAM Studio)."""
     bpy.ops.wm.read_factory_settings(use_empty=True)
     arm = create_mixamo_armature(bpy.context, _neutral_joints(), name="Armature")
     ob = build_mannequin(arm)
@@ -1478,7 +1478,7 @@ def inspect_character(path, glb_path=None):
 
 
 def retarget_file(anim_path, char_path, out_fbx, root_mode="RELATIVE", glb_path=None):
-    """Animation FBX (MocapCam ou Mixamo) -> personnage riggé animé (FBX avec maillage)."""
+    """Animation FBX (MOCAM ou Mixamo) -> personnage riggé animé (FBX avec maillage)."""
     bpy.ops.wm.read_factory_settings(use_empty=True)
     context = bpy.context
     dst, meshes = load_character(context, char_path)
@@ -1555,7 +1555,7 @@ def _is_armature(self, o):
 
 
 def import_animation(context, filepath):
-    """Importe un FBX d'animation (MocapCam ou Mixamo) ; renvoie l'armature animée."""
+    """Importe un FBX d'animation (MOCAM ou Mixamo) ; renvoie l'armature animée."""
     if context.mode != "OBJECT":
         bpy.ops.object.mode_set(mode="OBJECT")
     before = set(bpy.data.objects)
@@ -1581,7 +1581,7 @@ def import_animation(context, filepath):
 
 
 class MOCAPCAM_OT_import_fbx(bpy.types.Operator, ImportHelper):
-    """Importer une animation MocapCam (.fbx, squelette Mixamo)"""
+    """Importer une animation MOCAM (.fbx, squelette Mixamo)"""
     bl_idname = "mocapcam.import_fbx"
     bl_label = "Importer une animation (.fbx)"
     bl_options = {"REGISTER", "UNDO"}
@@ -1725,10 +1725,10 @@ def _prefix_label(lay, o):
 
 
 class MOCAPCAM_PT_panel(bpy.types.Panel):
-    bl_label = "MocapCam"
+    bl_label = "MOCAM"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "MocapCam"
+    bl_category = "MOCAM"
 
     def draw(self, context):
         sc = context.scene
@@ -1753,11 +1753,11 @@ class MOCAPCAM_PT_panel(bpy.types.Panel):
 
 
 def menu_import(self, context):
-    self.layout.operator(MOCAPCAM_OT_import_fbx.bl_idname, text="Animation MocapCam (.fbx)")
+    self.layout.operator(MOCAPCAM_OT_import_fbx.bl_idname, text="Animation MOCAM (.fbx)")
 
 
 def menu_export(self, context):
-    self.layout.operator(MOCAPCAM_OT_export_fbx.bl_idname, text="FBX MocapCam (Mixamo)")
+    self.layout.operator(MOCAPCAM_OT_export_fbx.bl_idname, text="FBX MOCAM (Mixamo)")
 
 
 CLASSES = (MOCAPCAM_OT_import_fbx, MOCAPCAM_OT_retarget, MOCAPCAM_OT_export_fbx, MOCAPCAM_OT_fix_fps,
@@ -1769,7 +1769,7 @@ def register():
         bpy.utils.register_class(c)
     bpy.types.Scene.mocapcam_source = PointerProperty(
         name="Source", type=bpy.types.Object, poll=_is_armature,
-        description="Armature animée (ex. le FBX MocapCam importé)")
+        description="Armature animée (ex. le FBX MOCAM importé)")
     bpy.types.Scene.mocapcam_target = PointerProperty(
         name="Cible", type=bpy.types.Object, poll=_is_armature,
         description="Armature du personnage qui reçoit l'animation")
@@ -1788,7 +1788,7 @@ def unregister():
 
 if __name__ == "__main__":
     import sys as _sys
-    if "--" in _sys.argv:      # lancé par MocapCam : blender -b ... --python mocapcam_blender.py -- ...
+    if "--" in _sys.argv:      # lancé par MOCAM : blender -b ... --python mocapcam_blender.py -- ...
         main_cli()
     else:
         register()

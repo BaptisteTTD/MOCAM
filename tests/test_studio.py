@@ -1,4 +1,4 @@
-"""Test de MocapCam Studio avec deux faux téléphones et un vrai navigateur (Playwright).
+"""Test de MOCAM Studio avec deux faux téléphones et un vrai navigateur (Playwright).
 
 Les faux téléphones ont chacun une horloge décalée et un délai réseau ; ils envoient
 aperçus et images de contrôle (sol + boules rendus), enregistrent une vidéo dont la

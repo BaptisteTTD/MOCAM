@@ -118,7 +118,7 @@ def inspect_character(path, glb_path=None, blender=None, log=print):
 
 
 def retarget(anim_fbx, character, out_fbx, glb_path=None, root_mode="RELATIVE", blender=None, log=print):
-    """Anime le personnage avec l'animation (FBX MocapCam) : FBX du personnage animé (+ GLB d'aperçu)."""
+    """Anime le personnage avec l'animation (FBX MOCAM) : FBX du personnage animé (+ GLB d'aperçu)."""
     args = ["retarget", os.path.abspath(anim_fbx), os.path.abspath(character), os.path.abspath(out_fbx), root_mode]
     if glb_path:
         args.append(os.path.abspath(glb_path))

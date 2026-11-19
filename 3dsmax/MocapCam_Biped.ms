@@ -1,7 +1,7 @@
 ﻿/*
-    MocapCam -> Biped  (3ds Max)
+    MOCAM -> Biped  (3ds Max)
     ---------------------------------------------------------------------------
-    Transfère une animation sur squelette Mixamo (FBX MocapCam, ou toute
+    Transfère une animation sur squelette Mixamo (FBX MOCAM, ou toute
     animation Mixamo) vers un Biped natif de 3ds Max (Character Studio).
 
     Utilisation :
@@ -17,7 +17,7 @@
     Biped prend la direction de l'os correspondant, et sa torsion est reprise
     de l'animation. Le déplacement est mis à l'échelle de ses jambes.
 
-    Un projet MocapCam — https://github.com/BaptisteTTD/MocapCam
+    Un projet MOCAM — https://github.com/BaptisteTTD/MocapCam
 */
 
 (
@@ -236,7 +236,7 @@ fn mcb_transfer srcAny com f0 f1 clearAnim doFingers keepPlace = (
     local nF = f1 - f0 + 1
     local P = #()
     local R = #()
-    progressStart "MocapCam : lecture de l'animation Mixamo…"
+    progressStart "MOCAM : lecture de l'animation Mixamo…"
     for ti = 1 to nF do (
         at time (f0 + ti - 1) (
             append P (for n in snodes collect n.transform.pos)
@@ -522,7 +522,7 @@ fn mcb_transfer srcAny com f0 f1 clearAnim doFingers keepPlace = (
     disableSceneRedraw()
     try (
     undo off (
-    progressStart "MocapCam : transfert vers le Biped…"
+    progressStart "MOCAM : transfert vers le Biped…"
     for ti = 1 to nF while (not cancelled) do (
         local t = f0 + ti - 1
         sliderTime = t
@@ -680,7 +680,7 @@ fn mcb_transfer srcAny com f0 f1 clearAnim doFingers keepPlace = (
     -- (le Biped peut décaler son bassin par rapport au centre de masse : on corrige la position
     -- du COM pour que les hanches soient exactement là où elles doivent être)
     if not cancelled do (
-        progressStart "MocapCam : recalage des hanches…"
+        progressStart "MOCAM : recalage des hanches…"
         for pass = 1 to 2 do (
             for ti = 1 to nF do (
                 local t = f0 + ti - 1
@@ -728,7 +728,7 @@ fn mcb_transfer srcAny com f0 f1 clearAnim doFingers keepPlace = (
 )
 
 -- ============================================================================ interface
-rollout MocapCamBipedRollout "MocapCam -> Biped" width:320
+rollout MocapCamBipedRollout "MOCAM -> Biped" width:320
 (
     local srcNode = undefined
     local comNode = undefined
@@ -762,7 +762,7 @@ rollout MocapCamBipedRollout "MocapCam -> Biped" width:320
             local allN = mcb_allNodes root #()
             local shorts = for n in allN collect (mcb_shortName n)
             if (findItem shorts "Hips") == 0 or (findItem shorts "LeftArm") == 0 then (
-                messageBox "Ce n'est pas un squelette Mixamo (os « Hips », « LeftArm »… introuvables)." title:"MocapCam"
+                messageBox "Ce n'est pas un squelette Mixamo (os « Hips », « LeftArm »… introuvables)." title:"MOCAM"
             ) else (
                 srcNode = obj
                 pbSrc.text = root.name
@@ -777,7 +777,7 @@ rollout MocapCamBipedRollout "MocapCam -> Biped" width:320
     on pbBip picked obj do (
         if obj != undefined do (
             local c = mcb_findCom obj
-            if c == undefined then messageBox "Ce n'est pas un Biped." title:"MocapCam" else (
+            if c == undefined then messageBox "Ce n'est pas un Biped." title:"MOCAM" else (
                 comNode = c
                 pbBip.text = c.name
                 local ctrl = c.transform.controller
@@ -788,9 +788,9 @@ rollout MocapCamBipedRollout "MocapCam -> Biped" width:320
         )
     )
     on btGo pressed do (
-        if srcNode == undefined or (isDeleted srcNode) then messageBox "Choisissez d'abord le squelette Mixamo." title:"MocapCam"
-        else if comNode == undefined or (isDeleted comNode) then messageBox "Choisissez d'abord le Biped." title:"MocapCam"
-        else if spEnd.value <= spStart.value then messageBox "Plage d'images vide." title:"MocapCam"
+        if srcNode == undefined or (isDeleted srcNode) then messageBox "Choisissez d'abord le squelette Mixamo." title:"MOCAM"
+        else if comNode == undefined or (isDeleted comNode) then messageBox "Choisissez d'abord le Biped." title:"MOCAM"
+        else if spEnd.value <= spStart.value then messageBox "Plage d'images vide." title:"MOCAM"
         else (
             lbInfo.text = "Transfert en cours…"
             local t0 = timeStamp()

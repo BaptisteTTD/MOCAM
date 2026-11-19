@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-title Diagnostic de l'app MocapCam (Android)
+title Diagnostic de l'app MOCAM (Android)
 set "ADB=%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe"
 if not exist "%ADB%" (
   echo adb introuvable dans %LOCALAPPDATA%\Android\Sdk\platform-tools
@@ -14,7 +14,7 @@ echo.
 "%ADB%" wait-for-device
 "%ADB%" devices -l
 echo.
-echo Lancement de l'app MocapCam et enregistrement des erreurs...
+echo Lancement de l'app MOCAM et enregistrement des erreurs...
 "%ADB%" logcat -c
 "%ADB%" shell monkey -p com.mocapcam.phone -c android.intent.category.LAUNCHER 1 >nul 2>nul
 timeout /t 10 /nobreak >nul

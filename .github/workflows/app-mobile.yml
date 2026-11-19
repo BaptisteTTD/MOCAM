@@ -1,9 +1,9 @@
-# Compile l'app MocapCam pour les téléphones, sur les serveurs de GitHub.
-# Lancement : onglet "Actions" du dépôt > "App mobile MocapCam" > "Run workflow".
+# Compile l'app MOCAM pour les téléphones, sur les serveurs de GitHub.
+# Lancement : onglet "Actions" du dépôt > "App mobile MOCAM" > "Run workflow".
 # Résultat : en bas de la page du lancement, rubrique "Artifacts" :
-#   - MocapCam-android : MocapCam.apk à installer sur le téléphone Android
-#   - MocapCam-iphone  : MocapCam-non-signee.ipa à installer avec Sideloadly (Apple ID gratuit)
-name: App mobile MocapCam
+#   - MOCAM-android : MOCAM.apk à installer sur le téléphone Android
+#   - MOCAM-iphone  : MOCAM-non-signee.ipa à installer avec Sideloadly (Apple ID gratuit)
+name: App mobile MOCAM
 
 on:
   workflow_dispatch:
@@ -38,11 +38,11 @@ jobs:
       - name: Compilation APK
         working-directory: mobile/MocapCamPhone/android
         run: ./gradlew assembleRelease --no-daemon
-      - run: cp android/app/build/outputs/apk/release/app-release.apk MocapCam.apk
+      - run: cp android/app/build/outputs/apk/release/app-release.apk MOCAM.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: MocapCam-android
-          path: mobile/MocapCamPhone/MocapCam.apk
+          name: MOCAM-android
+          path: mobile/MocapCamPhone/MOCAM.apk
 
   iphone:
     runs-on: macos-latest
@@ -66,16 +66,16 @@ jobs:
         working-directory: mobile/MocapCamPhone/ios
         run: |
           set -o pipefail
-          xcodebuild -workspace MocapCam.xcworkspace -scheme MocapCam \
+          xcodebuild -workspace MOCAM.xcworkspace -scheme MOCAM \
             -configuration Release -sdk iphoneos -destination "generic/platform=iOS" \
-            -archivePath "$PWD/build/MocapCam.xcarchive" archive \
+            -archivePath "$PWD/build/MOCAM.xcarchive" archive \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" | tail -n 80
       - name: Création de l'IPA
         run: |
           mkdir -p Payload
-          cp -R ios/build/MocapCam.xcarchive/Products/Applications/MocapCam.app Payload/
-          zip -qr MocapCam-non-signee.ipa Payload
+          cp -R ios/build/MOCAM.xcarchive/Products/Applications/MOCAM.app Payload/
+          zip -qr MOCAM-non-signee.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: MocapCam-iphone
-          path: mobile/MocapCamPhone/MocapCam-non-signee.ipa
+          name: MOCAM-iphone
+          path: mobile/MocapCamPhone/MOCAM-non-signee.ipa

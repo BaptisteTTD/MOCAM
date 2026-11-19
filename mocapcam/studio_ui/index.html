@@ -2,7 +2,8 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<title>MocapCam Studio</title>
+<title>MOCAM Studio</title>
+<link rel="icon" type="image/png" href="/favicon.png">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root {
@@ -25,6 +26,8 @@
 
   /* ---------------------------------------------------------------- barre du haut */
   .top { display: flex; align-items: center; gap: 18px; height: 56px; padding: 0 18px; border-bottom: 1px solid var(--line); background: var(--ink-1); }
+  .brand .logo { display: block; height: 40px; width: auto; }
+  .brand .studio { color: var(--muted); font-weight: 550; font-size: 17px; padding-top: 4px; }
   .brand { display: flex; align-items: center; gap: 10px; font: 650 16px/1 var(--display); letter-spacing: .1px; white-space: nowrap; }
   .tabs { display: flex; gap: 4px; margin-left: 14px; }
   .tab { background: none; border: 0; padding: 8px 14px; border-radius: var(--r-ctl); color: var(--muted); cursor: pointer; font-weight: 550; }
@@ -204,13 +207,8 @@
 <body>
 <header class="top">
   <div class="brand">
-    <!-- logo : les cinq boules au sol (A rouge, B vert, C bleu, D jaune, E rouge au milieu de A-D) -->
-    <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
-      <circle cx="4" cy="4" r="3" fill="#e8504a"/><circle cx="18" cy="4" r="3" fill="#33b574"/>
-      <circle cx="18" cy="18" r="3" fill="#4f80f4"/><circle cx="4" cy="18" r="3" fill="#f2c14e"/>
-      <circle cx="4" cy="11" r="2.2" fill="#e8504a"/>
-    </svg>
-    MocapCam Studio
+    <img src="/logo-mocam.png" alt="MOCAM" height="40" class="logo">
+    <span class="studio">Studio</span>
   </div>
   <nav class="tabs" role="tablist">
     <button class="tab" role="tab" data-page="pCams" aria-selected="true">Tournage<span class="count" id="nCams"></span></button>
@@ -261,7 +259,7 @@
       <div>
         <h2>Ajouter un personnage riggé</h2>
         <p class="hint">Glissez le fichier ici : FBX, GLB/glTF, .blend, ou un .zip avec ses textures. Squelettes reconnus : Mixamo, Unreal, Character Creator, Biped, DAZ, VRoid, Rigify. Le personnage par défaut est animé à chaque traitement ; le squelette seul, aux proportions de l'acteur, est toujours exporté aussi (prise_XXX.fbx).</p>
-        <p class="hint err-t" id="noBlender" style="display:none;margin-top:6px">Blender est nécessaire pour lire les personnages : installez-le (gratuit), puis relancez MocapCam Studio.</p>
+        <p class="hint err-t" id="noBlender" style="display:none;margin-top:6px">Blender est nécessaire pour lire les personnages : installez-le (gratuit), puis relancez MOCAM Studio.</p>
         <p class="hint" id="charBusy" style="display:none;margin-top:6px"></p>
       </div>
       <div class="row">
@@ -289,7 +287,7 @@
   <section>
     <h3>Réseau</h3>
     <div id="netDetail" class="hint"></div>
-    <button class="btn" id="btnFirewall">Autoriser MocapCam dans le pare-feu</button>
+    <button class="btn" id="btnFirewall">Autoriser MOCAM dans le pare-feu</button>
     <p class="hint">Utile sur un partage de connexion ou un réseau « public » : Windows demande l'accord de l'administrateur.</p>
     <button class="btn" id="btnNewQr">Nouveau QR code</button>
     <p class="hint">Les téléphones déjà connectés le restent ; les autres devront scanner le nouveau code.</p>
@@ -303,13 +301,13 @@
 
 <div id="toasts" aria-live="polite"></div>
 <div class="modal" id="modal"><img id="modalImg" alt="Image de vérification des boules"></div>
-<div id="disc">Connexion à MocapCam Studio perdue.<br>La fenêtre noire du serveur est-elle toujours ouverte ?</div>
+<div id="disc">Connexion à MOCAM Studio perdue.<br>La fenêtre noire du serveur est-elle toujours ouverte ?</div>
 <div id="fatal"><div><h2 id="fatalT"></h2><p id="fatalD"></p></div></div>
 
 <script>
 let ws, S = null, serverDelta = 0, takeTyped = false, selTake = null, logText = '';
 const autoAnimated = new Set();   // prises où le personnage par défaut a été lancé automatiquement
-const UI_VERSION = '1.3.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
+const UI_VERSION = '1.4.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
 function newerVersion(a, b) {
   const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
   for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
@@ -340,13 +338,13 @@ function connect() {
           try { last = +sessionStorage.getItem('mcReload') || 0; sessionStorage.setItem('mcReload', String(Date.now())); } catch (e) { /* stockage indisponible */ }
           if (Date.now() - last > 30000) { location.reload(); return; }
         }
-        fatal('MocapCam Studio doit être relancé',
-              `Cette fenêtre (version ${UI_VERSION}) ne correspond pas au serveur qui tourne (${S.version || 'ancienne version'}).\n\nRelancez MocapCam Studio.bat : l'ancien serveur est fermé et remplacé tout seul.`);
+        fatal('MOCAM Studio doit être relancé',
+              `Cette fenêtre (version ${UI_VERSION}) ne correspond pas au serveur qui tourne (${S.version || 'ancienne version'}).\n\nRelancez MOCAM Studio.bat : l'ancien serveur est fermé et remplacé tout seul.`);
         return;
       }
       $('fatal').style.display = 'none';
       try { render(); }
-      catch (e) { console.error(e); fatal('Erreur d\'affichage', `${e.message}\n\nRelancez MocapCam Studio.bat. Si l'erreur revient, envoyez ce message.`); }
+      catch (e) { console.error(e); fatal('Erreur d\'affichage', `${e.message}\n\nRelancez MOCAM Studio.bat. Si l'erreur revient, envoyez ce message.`); }
     }
     else if (m.type === 'preview') { const img = document.querySelector(`img[data-prev="${m.cam}"]`); if (img) img.src = `/preview/${m.cam}?t=${m.ts}`; }
     else if (m.type === 'log') { if (m.reset) logText = ''; logText += m.line + '\n'; const l = $('log'); if (l) { l.textContent = logText; l.scrollTop = l.scrollHeight; } }
@@ -491,7 +489,7 @@ function addCard() {
   const real = (n.adapters || []).length;
   let alert = '';
   if (n.public && n.firewall_rule === false)
-    alert = `<div class="alert"><span>Ce réseau est classé « public » par Windows : il peut bloquer les téléphones (partage de connexion notamment).</span><button class="btn small" onclick="toast('Windows va demander l\\'accord de l\\'administrateur…');send({a:'firewall'})">Autoriser MocapCam</button></div>`;
+    alert = `<div class="alert"><span>Ce réseau est classé « public » par Windows : il peut bloquer les téléphones (partage de connexion notamment).</span><button class="btn small" onclick="toast('Windows va demander l\\'accord de l\\'administrateur…');send({a:'firewall'})">Autoriser MOCAM</button></div>`;
   if (!real) alert += `<div class="alert err"><span>Le PC n'est connecté à aucun réseau : connectez-le au Wi-Fi, ou au partage de connexion d'un téléphone.</span></div>`;
   return `<div class="add">
     <img class="qr" src="/qr.svg?k=${S.qr_key}" alt="QR code de connexion">
@@ -499,7 +497,7 @@ function addCard() {
       <h3>${S.cams.length ? 'Ajouter un autre téléphone' : 'Connecter les téléphones'}</h3>
       <ol>
         <li>Mettez le téléphone sur ${n.ssid ? `le Wi-Fi <b>${esc(n.ssid)}</b>` : 'le même réseau que ce PC'}${hs ? `${n.ssid ? ',' : ''} ou sur le point d'accès de ce PC${n.hotspot.ssid ? ` <b>${esc(n.hotspot.ssid)}</b>` : ''}` : ''}. Le partage de connexion d'un des téléphones marche aussi : connectez-y le PC.</li>
-        <li>Ouvrez l'app <b>MocapCam</b> et donnez un nom à la caméra.</li>
+        <li>Ouvrez l'app <b>MOCAM</b> et donnez un nom à la caméra.</li>
         <li>Scannez ce code.</li>
       </ol>
       <p class="hint">Le téléphone qui partage sa connexion peut filmer lui aussi.</p>
@@ -649,7 +647,7 @@ function renderTakeDetail(force) {
         <div class="panel">
           <div class="side-h">Fichiers</div>
           <div class="files">
-            ${t.fbx ? `<div class="file"><span class="ext">FBX</span><span>${esc(t.name)}.fbx — rig Mixamo animé (65 os, sans maillage)</span></div>` : '<div class="hint">Le FBX (rig Mixamo animé) est créé à la fin du traitement.</div>'}
+            ${t.fbx ? `<div class="file"><span class="ext">FBX</span><span>${esc(t.name)}.fbx — squelette seul (rig Mixamo, sans maillage)</span></div>` : '<div class="hint">Le FBX (rig Mixamo animé) est créé à la fin du traitement.</div>'}
             ${animated.map(c => `<div class="file"><span class="ext">FBX</span><span>${esc(t.name)}_${esc(c.id)}.fbx — ${esc(c.name)} animé</span></div>`).join('')}
           </div>
           <div class="row">
@@ -712,7 +710,7 @@ function renderChars() {
       <div class="thumb" data-thumb="${esc(c.id)}">Aperçu…</div>
       <div class="body">
         <div class="nm">${esc(c.name)}</div>
-        ${c.builtin ? '<div class="meta">Fourni avec MocapCam</div>' : ''}
+        ${c.builtin ? '<div class="meta">Fourni avec MOCAM</div>' : ''}
         <div class="meta">Squelette ${esc(i.kind || '?')}, ${i.mapped ?? '?'} os reconnus${i.fingers ? ', doigts' : ', sans doigts'}</div>
         <div class="meta">${i.meshes ?? 0} maillage${i.meshes > 1 ? 's' : ''}${i.triangles ? `, ${i.triangles >= 10000 ? fr(i.triangles / 1000, 0) + ' k' : fr(i.triangles, 0)} triangles` : ''}${i.height ? `, ${fr(i.height * 100, 0)} cm de haut` : ''}</div>
         <div class="acts">
@@ -749,7 +747,7 @@ function render() {
   const n = S.net || {};
   const st = S.cams.length >= 2 ? 'ok' : S.cams.length ? 'warn' : 'err';
   $('net').innerHTML = `<span class="dot ${(n.adapters || []).length ? (n.public && n.firewall_rule === false ? 'warn' : 'ok') : 'err'}"></span>${n.ssid ? `Wi-Fi <b>${esc(n.ssid)}</b>` : n.hotspot && n.hotspot.on ? 'Point d\'accès du PC' : (n.adapters || []).length ? 'Réseau filaire' : 'Pas de réseau'}<span class="dot ${st}" style="margin-left:10px"></span>${S.cams.length} caméra${S.cams.length > 1 ? 's' : ''}`;
-  $('netDetail').innerHTML = (n.adapters || []).map(a => `${esc(a.name)} : ${esc(a.ip)}`).join('<br>') + (n.public ? '<br><span class="warn-t">Réseau classé public par Windows</span>' : '') + (n.firewall_rule ? '<br><span class="ok-t">Règle de pare-feu MocapCam active</span>' : '');
+  $('netDetail').innerHTML = (n.adapters || []).map(a => `${esc(a.name)} : ${esc(a.ip)}`).join('<br>') + (n.public ? '<br><span class="warn-t">Réseau classé public par Windows</span>' : '') + (n.firewall_rule ? '<br><span class="ok-t">Règle de pare-feu MOCAM active</span>' : '');
   $('paths').textContent = `Prises : ${S.captures}`;
   if (document.activeElement !== $('p60')) $('p60').checked = !!S.prefer60;
   if (document.activeElement !== $('pfps')) $('pfps').value = String(S.preview_fps);
@@ -770,7 +768,7 @@ setInterval(() => {
 }, 100);
 </script>
 
-<!-- ============================================================ aperçu 3D (three.js, fourni avec MocapCam) -->
+<!-- ============================================================ aperçu 3D (three.js, fourni avec MOCAM) -->
 <script type="module">
 import { THREE, GLTFLoader, OrbitControls } from '/vendor/three-bundle.min.js';
 

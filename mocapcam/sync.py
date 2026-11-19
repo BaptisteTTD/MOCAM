@@ -43,7 +43,7 @@ def audio_delay(audio_ref, audio_other, sr=16000, max_lag_s=20.0, env_sr=1000):
 
 
 # ----------------------------------------------------------------------------- chirp
-# Signal sonore joué par MocapCam Studio (haut-parleurs du PC) juste après le départ
+# Signal sonore joué par MOCAM Studio (haut-parleurs du PC) juste après le départ
 # de l'enregistrement. Le même signal est généré dans l'interface (Web Audio).
 CHIRP = dict(f0=1500.0, f1=6000.0, dur=0.30)
 

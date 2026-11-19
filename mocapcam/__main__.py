@@ -1,4 +1,4 @@
-"""Ligne de commande MocapCam.
+"""Ligne de commande MOCAM.
 
   python -m mocapcam init        STUDIO
   python -m mocapcam intrinseques STUDIO CAMERA VIDEO_DAMIER

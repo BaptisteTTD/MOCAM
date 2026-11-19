@@ -1,4 +1,4 @@
-﻿-- Test en lot (3dsmaxbatch) : import du FBX MocapCam, Biped neuf, transfert, mesures.
+﻿-- Test en lot (3dsmaxbatch) : import du FBX MOCAM, Biped neuf, transfert, mesures.
 (
 local dir = getFilenamePath (getSourceFileName())
 local logf = createFile (dir + "resultat.txt")

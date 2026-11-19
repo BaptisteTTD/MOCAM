@@ -1,4 +1,4 @@
-"""MocapCam : motion capture sans marqueurs multi-caméras (traitement différé).
+"""MOCAM : motion capture sans marqueurs multi-caméras (traitement différé).
 
 Pipeline :
   vidéos téléphones -> normalisation (CFR) -> synchro audio (clap)

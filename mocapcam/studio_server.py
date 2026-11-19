@@ -1,8 +1,8 @@
-"""MocapCam Studio : pilotage des téléphones depuis le PC.
+"""MOCAM Studio : pilotage des téléphones depuis le PC.
 
-  python -m mocapcam studio            (ou double-clic sur « MocapCam Studio.bat »)
+  python -m mocapcam studio            (ou double-clic sur « MOCAM Studio.bat »)
 
-- les téléphones (app MocapCam) se connectent en scannant un QR code (Wi-Fi ou partage de
+- les téléphones (app MOCAM) se connectent en scannant un QR code (Wi-Fi ou partage de
   connexion d'un téléphone) ;
 - aperçu en direct, état (batterie, i/s, synchro d'horloge), champ de vision ;
 - vérification des boules au sol en direct ;
@@ -35,7 +35,7 @@ from . import fbx, markers as mk, pipeline, sync
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "studio_ui")
 # version du serveur : l'interface (index.html) vérifie qu'elle parle au serveur de la même version
-STUDIO_VERSION = "1.3.0"
+STUDIO_VERSION = "1.4.0"
 
 # horloge du PC en ms (monotone, calée sur l'heure système au démarrage)
 _EPOCH = time.time() * 1000 - time.monotonic() * 1000
@@ -123,7 +123,7 @@ def _adapter_label(kind, name):
 
 def network_info(port=8765):
     """Adresses du PC (Wi-Fi d'abord, cartes virtuelles exclues), nom du Wi-Fi, point d'accès mobile
-    du PC, profil réseau Windows (public = pare-feu plus strict) et règle de pare-feu MocapCam."""
+    du PC, profil réseau Windows (public = pare-feu plus strict) et règle de pare-feu MOCAM."""
     info = dict(hosts=[], ssid=None, public=False, firewall_rule=None, adapters=[], hotspot=None)
     if sys.platform.startswith("win"):
         ad = [x for x in windows_adapters() if not x[2].startswith(("127.", "169.254."))]
@@ -150,7 +150,7 @@ def network_info(port=8765):
             info["public"] = any(str(p.get("NetworkCategory")) in ("0", "Public") for p in prof)
         except ValueError:
             pass
-        rc, _ = _run(["netsh", "advfirewall", "firewall", "show", "rule", "name=MocapCam Studio"])
+        rc, _ = _run(["netsh", "advfirewall", "firewall", "show", "rule", "name=MOCAM Studio"])
         info["firewall_rule"] = rc == 0
     if not info["hosts"]:
         info["hosts"] = lan_addresses()
@@ -160,9 +160,9 @@ def network_info(port=8765):
 
 
 def allow_firewall(port):
-    """Ouvre le port de MocapCam Studio sur tous les réseaux (public compris : partage de
+    """Ouvre le port de MOCAM Studio sur tous les réseaux (public compris : partage de
     connexion d'un téléphone). Windows demande l'accord de l'administrateur."""
-    args = (f'advfirewall firewall add rule name="MocapCam Studio" dir=in action=allow protocol=TCP '
+    args = (f'advfirewall firewall add rule name="MOCAM Studio" dir=in action=allow protocol=TCP '
             f'localport={port} profile=any')
     ps = f"Start-Process netsh -ArgumentList '{args}' -Verb RunAs -WindowStyle Hidden -Wait"
     rc, out = _run(["powershell", "-NoProfile", "-Command", ps], timeout=120)
@@ -341,7 +341,9 @@ class Studio:
                     measured = round(h * 100) if h else None
                 except (OSError, ValueError):
                     pass
-            chars = [c for c in os.listdir(p) if c.startswith(d + "_") and c.endswith(".fbx")]
+            # personnages animés : FBX et aperçu GLB écrits (le GLB arrive juste après le FBX)
+            chars = [c for c in os.listdir(p) if c.startswith(d + "_") and c.endswith(".fbx")
+                     and os.path.exists(pipeline.character_outputs(p, c[len(d) + 1:-4])[1])]
             out.append(dict(name=d, videos=vids, processed=os.path.exists(res),
                             result=res if os.path.exists(res) else None,
                             fbx=os.path.exists(fbx_file), height_cm=height, measured_cm=measured,
@@ -954,7 +956,7 @@ class Studio:
 
     async def handle_take_rig(self, request):
         """Rig Mixamo animé de la prise, avec le mannequin (GLB) ; créé à la demande pour les
-        prises traitées avant MocapCam Studio 1.2."""
+        prises traitées avant MOCAM Studio 1.2."""
         take = safe_name(request.match_info["take"])
         tdir = os.path.join(self.captures_dir, take)
         src = os.path.join(tdir, "mocapcam", f"{take}.mocap.json")
@@ -1127,7 +1129,7 @@ class Studio:
             d = os.path.join(pipeline.characters_dir(self.studio_dir), cid)
             ch = pipeline.get_character(self.studio_dir, cid)
             if ch and ch.get("builtin"):
-                await self.toast(f"{ch.get('name')} est fourni avec MocapCam : il reste disponible", "warn")
+                await self.toast(f"{ch.get('name')} est fourni avec MOCAM : il reste disponible", "warn")
                 return
             if cid and os.path.isdir(d):
                 shutil.rmtree(d, ignore_errors=True)
@@ -1145,7 +1147,7 @@ class Studio:
         elif a == "firewall":
             ok = await asyncio.get_running_loop().run_in_executor(None, allow_firewall, self.port)
             self.net = await asyncio.get_running_loop().run_in_executor(None, network_info, self.port)
-            await self.toast("Pare-feu : MocapCam autorisé sur tous les réseaux" if self.net.get("firewall_rule")
+            await self.toast("Pare-feu : MOCAM autorisé sur tous les réseaux" if self.net.get("firewall_rule")
                              else "Pare-feu non modifié (accord administrateur refusé ?)",
                              "ok" if self.net.get("firewall_rule") else "warn")
             self.changed()
@@ -1187,7 +1189,7 @@ class Studio:
         return web.Response(body=buf.getvalue(), content_type="image/svg+xml", headers={"Cache-Control": "no-store"})
 
     async def handle_version(self, request):
-        return web.json_response(dict(app="MocapCam Studio", version=STUDIO_VERSION, pid=os.getpid()))
+        return web.json_response(dict(app="MOCAM Studio", version=STUDIO_VERSION, pid=os.getpid()))
 
     async def handle_index(self, request):
         return web.FileResponse(os.path.join(UI_DIR, "index.html"), headers={"Cache-Control": "no-store"})
@@ -1208,6 +1210,9 @@ class Studio:
         app.router.add_get("/take/{take}/squelette.json", self.handle_take_skeleton)
         app.router.add_get("/take/{take}/rig.glb", self.handle_take_rig)
         app.router.add_get("/rig_mixamo.glb", self.handle_rig_mixamo)
+        for img in ("logo-mocam.png", "favicon.png"):
+            app.router.add_get("/" + img, lambda r, img=img: web.FileResponse(
+                os.path.join(UI_DIR, img), headers={"Cache-Control": "max-age=3600"}))
         app.router.add_static("/vendor/", os.path.join(UI_DIR, "vendor"), show_index=False)
 
         async def on_startup(app):
@@ -1243,7 +1248,7 @@ def _port_free(port):
 
 
 def _running_studio(port):
-    """Version du MocapCam Studio qui occupe déjà le port ("ancienne" s'il ne la donne pas), ou None."""
+    """Version du MOCAM Studio qui occupe déjà le port ("ancienne" s'il ne la donne pas), ou None."""
     import urllib.error
     import urllib.request
     try:
@@ -1276,7 +1281,7 @@ def _listening_pids(port):
 
 
 def _stop_old_studio(port):
-    """Ferme un MocapCam Studio d'une autre version qui occupe le port. True si le port est libéré."""
+    """Ferme un MOCAM Studio d'une autre version qui occupe le port. True si le port est libéré."""
     if not sys.platform.startswith("win"):
         return False
     for pid in _listening_pids(port):
@@ -1297,20 +1302,20 @@ def run(studio_dir, captures_dir, port=8765, open_ui=True):
     if not _port_free(port):
         other = _running_studio(port)
         if other == STUDIO_VERSION:
-            print(f"MocapCam Studio est déjà ouvert ({url}) : sa fenêtre est réaffichée.")
+            print(f"MOCAM Studio est déjà ouvert ({url}) : sa fenêtre est réaffichée.")
             if open_ui:
                 open_window(url)
             return
         if other and _stop_old_studio(port):
-            print(f"Un MocapCam Studio d'une autre version ({other}) tournait encore : il a été fermé "
+            print(f"Un MOCAM Studio d'une autre version ({other}) tournait encore : il a été fermé "
                   "et remplacé par celui-ci. Vous pouvez fermer son ancienne fenêtre noire.")
         else:
-            print(f"Le port {port} est déjà utilisé" + (f" par MocapCam Studio ({other})" if other else
+            print(f"Le port {port} est déjà utilisé" + (f" par MOCAM Studio ({other})" if other else
                                                         " par un autre programme") +
-                  " : fermez-le (ou fermez les autres fenêtres noires de MocapCam), puis relancez.")
+                  " : fermez-le (ou fermez les autres fenêtres noires de MOCAM), puis relancez.")
             return
     st = Studio(studio_dir, captures_dir, port)
-    print(f"MocapCam Studio {STUDIO_VERSION} : {url}")
+    print(f"MOCAM Studio {STUDIO_VERSION} : {url}")
     print(f"  réseau : {', '.join(st.net.get('hosts') or lan_addresses())} (port {port}) — connectez les téléphones avec le QR code")
     print(f"  prises enregistrées dans : {st.captures_dir}")
     print("  Laissez cette fenêtre ouverte. Ctrl+C pour quitter.")

@@ -1,4 +1,4 @@
-// Connexion au PC (MocapCam Studio) : WebSocket + reconnexion automatique.
+// Connexion au PC (MOCAM Studio) : WebSocket + reconnexion automatique.
 
 export type StudioCommand =
   | { t: 'welcome'; id: string; name: string; prefer60?: boolean; preview?: number; lens?: 'wide' | 'ultra'; fov?: number }
@@ -28,7 +28,7 @@ export function toJson(v: unknown): string {
 
 export type ConnState = 'idle' | 'connecting' | 'connected' | 'error'
 
-/** QR code affiché par MocapCam Studio (seul moyen de connexion). */
+/** QR code affiché par MOCAM Studio (seul moyen de connexion). */
 export function parseQr(value: string): ConnectInfo | null {
   try {
     const d = JSON.parse(value)
@@ -36,7 +36,7 @@ export function parseQr(value: string): ConnectInfo | null {
       return { hosts: d.hosts.map(String), port: Number(d.port), token: String(d.token) }
     }
   } catch {
-    // pas un QR code de MocapCam Studio
+    // pas un QR code de MOCAM Studio
   }
   return null
 }

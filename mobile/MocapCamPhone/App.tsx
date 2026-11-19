@@ -2,6 +2,7 @@ import { StatusBar } from 'expo-status-bar'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
+  Image as RNImage,
   Platform,
   Pressable,
   StyleSheet,
@@ -45,7 +46,7 @@ import {
   type Settings,
 } from './src/settings'
 
-const APP_VERSION = '1.1.1'
+const APP_VERSION = '1.2.0'
 
 // Erreurs hors affichage (minuteries, callbacks natifs) : on les montre à l'écran
 // au lieu de laisser l'app se fermer.
@@ -81,7 +82,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
       return (
         <View style={styles.center}>
           <StatusBar hidden />
-          <Text style={styles.title}>MocapCam a rencontré une erreur</Text>
+          <Text style={styles.title}>MOCAM a rencontré une erreur</Text>
           <Text style={[styles.text, { fontSize: 13 }]} selectable>
             {String(this.state.error?.message ?? this.state.error)}
           </Text>
@@ -109,7 +110,7 @@ function AppInner() {
     return (
       <View style={styles.center}>
         <StatusBar hidden />
-        <Text style={styles.title}>MocapCam</Text>
+        <RNImage source={require('./assets/logo-mocam.png')} style={styles.logo} resizeMode="contain" accessibilityLabel="MOCAM" />
         <Text style={styles.text}>L'app a besoin de la caméra et du micro (le son sert à synchroniser les téléphones).</Text>
         <Btn
           label="Autoriser"
@@ -184,11 +185,11 @@ function ConnectScreen({
         ) : null}
         <View style={styles.scanFrame} pointerEvents="none" />
         <Text style={styles.scanHint}>
-          {bad ? "Ce n'est pas un QR code de MocapCam Studio" : 'Visez le QR code affiché par MocapCam Studio sur le PC'}
+          {bad ? "Ce n'est pas un QR code de MOCAM Studio" : 'Visez le QR code affiché par MOCAM Studio sur le PC'}
         </Text>
       </View>
       <View style={styles.side}>
-        <Text style={styles.title}>MocapCam</Text>
+        <RNImage source={require('./assets/logo-mocam.png')} style={styles.logo} resizeMode="contain" accessibilityLabel="MOCAM" />
         <Text style={styles.label}>Nom de cette caméra</Text>
         <TextInput
           style={styles.input}
@@ -879,7 +880,7 @@ function CaptureScreen({
         <View style={[styles.dot, { backgroundColor: connColor }]} />
         <Text style={styles.camName}>{settings.name}</Text>
         <Text style={styles.small}>
-          {conn.state === 'connected' ? 'connecté à MocapCam Studio' : conn.detail ?? 'connexion…'}
+          {conn.state === 'connected' ? 'connecté à MOCAM Studio' : conn.detail ?? 'connexion…'}
         </Text>
         <View style={{ flex: 1 }} />
         {recording ? (
@@ -1031,6 +1032,7 @@ const styles = StyleSheet.create({
   scanHint: { position: 'absolute', bottom: 16, color: '#fff', fontSize: 15, backgroundColor: '#0008', padding: 6 },
   side: { flex: 2, padding: 20, justifyContent: 'center' },
   title: { color: '#fff', fontSize: 28, fontWeight: '700', marginBottom: 12 },
+  logo: { width: 124, height: 64, marginBottom: 14 },
   label: { color: '#bbb', fontSize: 14, marginBottom: 4 },
   input: {
     color: '#fff',
