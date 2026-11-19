@@ -35,7 +35,7 @@ from . import fbx, markers as mk, pipeline, sync
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "studio_ui")
 # version du serveur : l'interface (index.html) vérifie qu'elle parle au serveur de la même version
-STUDIO_VERSION = "1.2.0"
+STUDIO_VERSION = "1.3.0"
 
 # horloge du PC en ms (monotone, calée sur l'heure système au démarrage)
 _EPOCH = time.time() * 1000 - time.monotonic() * 1000
@@ -249,7 +249,7 @@ class Studio:
         self._dirty = asyncio.Event()
         self.chirp_wav = None
         self.prefer60 = True        # priorité à 60 i/s (720p si le téléphone l'exige)
-        self.fov_by_name = self._load_fov()     # champ de vision choisi par caméra (×0,5 … ×2)
+        self.fov_by_name = self._load_fov()     # champ de vision choisi par caméra (×0,5 … ×1)
         self.preview_fps = 3.0
         self.net = dict(hosts=lan_addresses(), ssid=None, public=False, firewall_rule=None, adapters=[])
         self.queue = []             # traitements en attente
@@ -288,6 +288,17 @@ class Studio:
         cfg[key] = value
         with open(path, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=2, ensure_ascii=False)
+
+    async def install_bundled(self):
+        """Personnages fournis (personnages_fournis/, ex. Y Bot) installés au démarrage."""
+        try:
+            done = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: pipeline.install_bundled_characters(
+                    self.studio_dir, self.cfg().get("blender") or None, lambda x: print("  " + str(x).strip())))
+            if done:
+                self.changed()
+        except Exception as e:  # noqa: BLE001
+            print(f"  personnages fournis : {e}")
 
     async def net_loop(self):
         loop = asyncio.get_running_loop()
@@ -363,7 +374,8 @@ class Studio:
             now=now_ms(), studio=self.studio_dir, captures=self.captures_dir,
             prefer60=self.prefer60, preview_fps=self.preview_fps,
             actor_height_cm=cfg.get("actor_height_cm"),
-            characters=pipeline.list_characters(self.studio_dir), character=cfg.get("character") or "",
+            characters=pipeline.list_characters(self.studio_dir),
+            character=pipeline.default_character(self.studio_dir, cfg),
             char_busy=self.char_busy, blender=self.has_blender, version=STUDIO_VERSION,
         )
 
@@ -856,8 +868,9 @@ class Studio:
         rc = await p.wait()
         self.proc.update(running=False, ok=(rc == 0))
         if rc == 0:
-            done = {"traiter": f"Prise {take} traitée", "taille": f"{take} : {job['label'].lower()} terminée",
-                    "animer": f"{take} : {job['label'].lower()} terminée"}[kind]
+            lab = job["label"][:1].lower() + job["label"][1:]     # « animation de Y Bot »
+            done = {"traiter": f"Prise {take} traitée", "taille": f"{take} : {lab} terminée",
+                    "animer": f"{take} : {lab} terminée"}[kind]
             await self.toast(done, "ok")
         else:
             await self.toast(f"Échec : {job['label'].lower()} de {take} (voir le journal dans Prises)", "error")
@@ -910,7 +923,8 @@ class Studio:
                         created=time.strftime("%Y-%m-%d %H:%M:%S"))
             with open(os.path.join(d, "personnage.json"), "w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=2, ensure_ascii=False)
-            if not self.cfg().get("character"):
+            # premier personnage, sans personnage fourni (Y Bot) : il devient celui par défaut
+            if not self.cfg().get("character") and not any(c.get("builtin") for c in pipeline.list_characters(self.studio_dir)):
                 self.save_cfg_value("character", cid)
             await self.toast(f"Personnage « {meta['name']} » ajouté : squelette {info.get('kind')}, "
                              f"{info.get('mapped')} os reconnus", "ok")
@@ -1048,6 +1062,7 @@ class Studio:
                 v = float(m.get("value"))
             except (TypeError, ValueError):
                 return
+            v = min(1.0, max(0.3, v))     # on élargit seulement (×1 = objectif principal)
             self.fov_by_name[c.name] = v
             self._save_fov()
             await self.send(c, dict(t="config", fov=v, lens="ultra" if v < 0.99 else "wide"))
@@ -1110,6 +1125,10 @@ class Studio:
         elif a == "character_delete":
             cid = safe_name(m.get("id", "")).lower()
             d = os.path.join(pipeline.characters_dir(self.studio_dir), cid)
+            ch = pipeline.get_character(self.studio_dir, cid)
+            if ch and ch.get("builtin"):
+                await self.toast(f"{ch.get('name')} est fourni avec MocapCam : il reste disponible", "warn")
+                return
             if cid and os.path.isdir(d):
                 shutil.rmtree(d, ignore_errors=True)
                 if self.cfg().get("character") == cid:
@@ -1117,7 +1136,7 @@ class Studio:
                 await self.toast("Personnage supprimé (les FBX déjà animés restent dans les prises)")
             self.changed()
         elif a == "animate":
-            cid = m.get("id") or self.cfg().get("character")
+            cid = m.get("id") or pipeline.default_character(self.studio_dir, self.cfg())
             ch = pipeline.get_character(self.studio_dir, cid) if cid else None
             if ch is None:
                 await self.toast("Ajoutez d'abord un personnage (onglet Personnages)", "error")
@@ -1194,6 +1213,7 @@ class Studio:
         async def on_startup(app):
             app["pusher"] = asyncio.create_task(self.state_pusher())
             app["net"] = asyncio.create_task(self.net_loop())
+            app["bundled"] = asyncio.create_task(self.install_bundled())
 
         app.on_startup.append(on_startup)
         return app

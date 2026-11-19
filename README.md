@@ -6,7 +6,7 @@ et les doigts : un **FBX au squelette Mixamo**, prêt pour Blender, Unity, Unrea
 Trois éléments :
 * **l'app MocapCam** sur chaque téléphone : elle se connecte au PC en scannant un QR code et
   filme avec des réglages fixes (1080p 60 i/s, stabilisation coupée, exposition bloquée), avec
-  le champ de vision de votre choix (×0,5 à ×2) ;
+  le champ de vision de votre choix (de ×1 jusqu'à l'ultra grand-angle, ×0,5) ;
 * **MocapCam Studio** sur le PC : vous y voyez les caméras, vérifiez les boules, lancez et
   arrêtez l'enregistrement de tous les téléphones d'un clic, traitez les prises, les regardez en
   3D et les appliquez directement sur **votre propre personnage riggé** ;
@@ -107,10 +107,12 @@ la stabilisation coupée et une image sans HDR. Studio affiche ce que chaque té
 réellement accepté.
 
 **Champ de vision** : choisissez-le dans l'app (barre du bas) ou dans Studio (sous l'image de
-chaque caméra) : **×0,5** (ultra grand-angle), ×0,7, **×1**, ×1,5 ou ×2. Chaque téléphone retient
-son réglage. ×1 est le plus précis ; prenez ×0,5 ou ×0,7 dans une petite pièce, quand l'acteur
-sort du cadre, et ×1,5 ou ×2 si les caméras sont loin. Seules les valeurs que le téléphone sait
-faire sont proposées. Changer de champ de vision entre deux prises ne demande aucune
+chaque caméra) : **×1** (objectif principal, le plus serré), puis ×0,8, ×0,7, ×0,6 et **×0,5**
+(ultra grand-angle, le plus large). On ne fait qu'élargir : jamais de zoom avant. Chaque
+téléphone retient son réglage. ×1 est le plus précis ; élargissez dans une petite pièce, quand
+l'acteur sort du cadre. Seules les valeurs que le téléphone sait faire sont proposées (le plus
+large dépend de son ultra grand-angle, par exemple ×0,6) ; certains Android ne laissent pas
+les autres apps utiliser l'ultra grand-angle : l'app reste alors à ×1 et le dit. Changer de champ de vision entre deux prises ne demande aucune
 calibration : vérifiez simplement les boules à nouveau.
 
 **Cadrage** : ce que montre Studio est exactement ce qui est filmé. Sur Android, l'app filme
@@ -190,12 +192,12 @@ réglages (cadence, réseau, dossiers).
 
 **Traiter** (onglet **Prises**) : choisissez la prise, puis **Traiter la prise**. Les 6 étapes
 s'affichent avec leur avancement ; plusieurs prises peuvent attendre leur tour. Le résultat :
-* **`captures\prise_XXX\prise_XXX.fbx`** : toujours, l'animation sur un **rig Mixamo** (65 os,
-  sans maillage, section 8), à la taille indiquée. C'est la sortie par défaut, sans aucun
-  fichier de personnage à fournir ;
-* un **aperçu 3D** dans Studio : ce rig Mixamo habillé d'un mannequin gris aux articulations
-  bleues, ou votre personnage ; lecture et image par image ;
-* si vous avez choisi un de vos personnages, **`prise_XXX_<personnage>.fbx`** : il est animé en plus.
+* **`captures\prise_XXX\prise_XXX_ybot.fbx`** : l'animation sur **Y Bot** (le personnage Mixamo
+  par défaut, maillage compris), ou sur le personnage que vous avez choisi par défaut ;
+* **`captures\prise_XXX\prise_XXX.fbx`** : toujours aussi, le **squelette seul** (rig Mixamo de
+  65 os, sans maillage, section 8), aux proportions de l'acteur et à la taille indiquée ;
+* un **aperçu 3D** dans Studio : Y Bot par défaut, ou le squelette (mannequin gris) ; lecture et
+  image par image. Pour une prise traitée avant, Y Bot est animé tout seul quand vous l'ouvrez.
 
 La taille de l'acteur peut être corrigée après coup dans le panneau de la prise
 (*Taille de l'acteur*, puis **Appliquer**) : c'est immédiat, sans retraiter, et le FBX est refait.
@@ -204,8 +206,11 @@ contrôles), inutiles pour l'utilisation.
 
 ### Animer votre propre personnage
 
-Sans rien importer, tout sort sur le **rig Mixamo** fourni (première carte de l'onglet
-*Personnages*, « Sortie par défaut »). Pour animer en plus votre propre modèle :
+Par défaut, chaque prise est animée sur **Y Bot** (première carte de l'onglet *Personnages*,
+« Fourni avec MocapCam »). Il vient du dossier `personnages_fournis\` du programme : tout
+fichier de personnage posé là est installé au lancement de Studio (voir `LISEZMOI.txt` dans ce
+dossier pour retélécharger Y Bot ; il n'est pas sur GitHub, Mixamo ne permettant pas de
+redistribuer ses fichiers tels quels). Pour animer votre propre modèle :
 
 Onglet **Personnages** : glissez le fichier de votre personnage riggé (**FBX, GLB/glTF, .blend**,
 ou un **.zip** avec ses textures), donnez-lui un nom. Studio l'analyse avec Blender et affiche
@@ -213,9 +218,8 @@ sa vignette, son nombre d'os et le type de squelette reconnu : **Mixamo, Unreal 
 Character Creator, Biped 3ds Max, VRoid, DAZ, Rigify**, ou des noms usuels (`upperarm_l`,
 `LeftForeArm`, `Hand.R`…). Les doigts sont animés s'il en a.
 
-* Bouton **Animer après chaque traitement** : ce personnage est animé automatiquement à la fin
-  de chaque traitement (en plus du rig Mixamo). *Utiliser seul*, sur la carte Rig Mixamo, revient
-  à la sortie par défaut.
+* Bouton **Utiliser par défaut** : ce personnage remplace Y Bot, il est animé à la fin de chaque
+  traitement. *Utiliser par défaut* sur la carte Y Bot y revient.
 * Pour une prise déjà traitée : onglet *Prises*, liste *Animer un personnage*, choisissez-le puis
   **Animer**. L'aperçu 3D peut alors montrer le personnage au lieu du squelette.
 * Le résultat garde le maillage, les matériaux et la pose de repos du personnage ; seule son
@@ -326,7 +330,7 @@ dans `3dsmax\test\resultat.txt`.
 | `marker_height` | hauteur du centre visible des boules : 0,4 × le rayon pour une demi-boule (0,016 m pour une boule de 8 cm coupée en deux) |
 | `markers[].position` | positions en mètres. Seule la forme compte quand la taille de l'acteur est indiquée. |
 | `actor_height_cm` | taille de l'acteur, réglée depuis Studio (chaque prise garde la sienne dans `take.json`) |
-| `character` | personnage animé après chaque traitement (dossier dans `personnages\`), réglé depuis Studio |
+| `character` | personnage animé après chaque traitement (dossier dans `personnages\`), réglé depuis Studio ; vide : le personnage fourni (Y Bot) |
 | `sync_by_motion` | `true` : après le bip, la synchro est affinée avec le mouvement de l'acteur. Dans un téléphone, le son et l'image peuvent être décalés de plusieurs dizaines de ms (100 ms mesurées sur un Poco X3) : sans cette correction, les gestes rapides tremblent. |
 | `blender` | chemin de `blender.exe` pour le FBX, si Blender n'est pas trouvé tout seul |
 | `fbx` | `false` pour ne pas créer de FBX |
@@ -356,7 +360,7 @@ dans `3dsmax\test\resultat.txt`.
 | L'app iPhone ne s'ouvre plus | Les 7 jours sont passés : réinstallez-la avec Sideloadly. |
 | « FBX non créé : Blender introuvable » | Installez Blender (blender.org), ou indiquez son chemin dans `studio.json`, clé `blender`. |
 | Vidéo plus serrée que l'aperçu | Mettez à jour l'app (1.0.5 ou plus). |
-| Pas de choix de champ de vision dans l'app | Mettez à jour l'app (1.1.0 ou plus). |
+| Pas de choix de champ de vision dans l'app | Mettez à jour l'app (1.1.1 ou plus). Si l'app indique « ce téléphone ne laisse pas l'app élargir le champ », son fabricant réserve l'ultra grand-angle à sa propre app photo : reculez la caméra. |
 | « Pas assez de points communs » | L'acteur est trop peu visible par les deux caméras à la fois. Rapprochez les caméras de l'axe de jeu. |
 | Doigts qui tremblent | Rapprochez les caméras, éclairez mieux, baissez `cutoff_hands_hz` à 5–6. |
 | Bras qui tressautent dans les gestes rapides | Vérifiez dans le journal la ligne « synchro fine par le mouvement » ; montez la lumière (moins de flou de bougé) et bloquez l'exposition avec l'obturation rapide. |

@@ -260,7 +260,7 @@
     <div class="drop" id="drop">
       <div>
         <h2>Ajouter un personnage riggé</h2>
-        <p class="hint">Glissez le fichier ici : FBX, GLB/glTF, .blend, ou un .zip avec ses textures. Squelettes reconnus : Mixamo, Unreal, Character Creator, Biped, DAZ, VRoid, Rigify. Sans personnage, chaque prise sort sur le rig Mixamo.</p>
+        <p class="hint">Glissez le fichier ici : FBX, GLB/glTF, .blend, ou un .zip avec ses textures. Squelettes reconnus : Mixamo, Unreal, Character Creator, Biped, DAZ, VRoid, Rigify. Le personnage par défaut est animé à chaque traitement ; le squelette seul, aux proportions de l'acteur, est toujours exporté aussi (prise_XXX.fbx).</p>
         <p class="hint err-t" id="noBlender" style="display:none;margin-top:6px">Blender est nécessaire pour lire les personnages : installez-le (gratuit), puis relancez MocapCam Studio.</p>
         <p class="hint" id="charBusy" style="display:none;margin-top:6px"></p>
       </div>
@@ -308,7 +308,8 @@
 
 <script>
 let ws, S = null, serverDelta = 0, takeTyped = false, selTake = null, logText = '';
-const UI_VERSION = '1.2.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
+const autoAnimated = new Set();   // prises où le personnage par défaut a été lancé automatiquement
+const UI_VERSION = '1.3.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
 function newerVersion(a, b) {
   const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
   for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
@@ -403,7 +404,7 @@ function fmtBytes(b) { if (b == null) return '?'; return b > 1e9 ? fr(b / 1e9) +
 function syncCls(ms) { return ms == null ? '' : ms < 30 ? 'ok-t' : ms < 100 ? 'warn-t' : 'err-t'; }
 function fovOf(c) { return c.fov != null ? c.fov : (c.lens === 'ultra' ? 0.5 : 1); }
 function fovOptions(c) {
-  if (Array.isArray(c.fov_options) && c.fov_options.length) return c.fov_options;
+  if (Array.isArray(c.fov_options) && c.fov_options.length) return c.fov_options.filter(v => v <= 1.001);  // app 1.1.0 : sans le zoom avant
   return c.ultra_available ? [0.5, 1] : [1];
 }
 function fovLabel(v) { return '×' + fr(v, 1); }
@@ -463,7 +464,7 @@ function camCard(c) {
     <div class="cam-row">
       <span class="lbl">Champ de vision</span>
       <span class="seg" role="group" aria-label="Champ de vision">${opts.map(v => `<button aria-pressed="${Math.abs(v - fov) < 0.01}" ${c.recording ? 'disabled' : ''} onclick="send({a:'fov',cam:'${c.id}',value:${v}})">${fovLabel(v)}</button>`).join('')}</span>
-      ${opts.length === 1 ? '<span class="hint">Mettez l\'app à jour pour changer le champ</span>' : ''}
+      ${opts.length === 1 ? `<span class="hint">${Array.isArray(c.fov_options) ? 'Ce téléphone ne laisse pas l\'app élargir le champ' : 'Mettez l\'app à jour pour changer le champ'}</span>` : ''}
     </div>
     <div class="cam-row"><span class="lbl">Boules au sol</span><span class="balls-line">${checkLine(c)}</span></div>
     ${up}
@@ -597,9 +598,20 @@ function renderTakeDetail(force) {
   if (!t) { box.innerHTML = '<div class="empty-page">Les prises filmées apparaissent ici.</div>'; return; }
   const chars = S.characters;
   const animated = chars.filter(c => t.characters.includes(c.id));
-  const sources = [{ id: '', label: 'Rig Mixamo' }].concat(animated.map(c => ({ id: c.id, label: c.name })));
-  if (viewerSel == null || !sources.some(s => s.id === viewerSel.id && viewerSel.take === t.name)) viewerSel = { take: t.name, id: animated.length && animated.some(c => c.id === S.character) ? S.character : '' };
+  // personnage par défaut en premier, le squelette de l'acteur en dernier
+  animated.sort((a, b) => (b.id === S.character) - (a.id === S.character));
+  const sources = animated.map(c => ({ id: c.id, label: c.name })).concat([{ id: '', label: 'Squelette' }]);
+  const wantSrc = animated.length ? animated[0].id : '';
+  if (viewerSel == null || viewerSel.take !== t.name || !sources.some(s => s.id === viewerSel.id) || (viewerSel.auto && viewerSel.id !== wantSrc))
+    viewerSel = { take: t.name, id: wantSrc, auto: true };
   const busy = running || queued;
+  // personnage par défaut pas encore animé sur cette prise (prise plus ancienne) : on l'anime
+  const defChar = chars.find(c => c.id === S.character);
+  const defMissing = defChar && t.fbx && !t.characters.includes(defChar.id);
+  if (defMissing && !busy && S.blender && !autoAnimated.has(t.name) && $('pTakes').classList.contains('on')) {
+    autoAnimated.add(t.name);
+    send({ a: 'animate', take: t.name, id: defChar.id });
+  }
   const stepsHtml = running && P.kind === 'traiter' ? `<div class="steps">${STEPS.map((s, i) => `<div class="step ${i + 1 < P.step ? 'done' : i + 1 === P.step ? 'cur' : ''}"><span class="n">${i + 1}</span><span>${s}</span></div>`).join('')}</div>` : '';
   const hVal = t.height_cm ?? '';
   box.innerHTML = `
@@ -615,7 +627,7 @@ function renderTakeDetail(force) {
           <input type="range" id="vScrub" min="0" max="1000" value="0" aria-label="Position dans la prise">
           <span class="time" id="vTime"></span>
         </div>
-        ${t.preview ? `<div class="row" style="align-items:center"><span class="hint">Afficher</span><span class="seg">${sources.map(s => `<button aria-pressed="${s.id === viewerSel.id}" onclick="pickViewer('${esc(t.name)}','${esc(s.id)}')">${esc(s.label)}</button>`).join('')}</span></div>` : ''}
+        ${t.preview ? `<div class="row" style="align-items:center"><span class="hint">Afficher</span><span class="seg">${sources.map(s => `<button aria-pressed="${s.id === viewerSel.id}" onclick="pickViewer('${esc(t.name)}','${esc(s.id)}')">${esc(s.label)}</button>`).join('')}</span>${defMissing && busy ? `<span class="hint">${esc(defChar.name)} en préparation…</span>` : ''}</div>` : ''}
       </div>
       <div style="display:grid;gap:18px">
         <div class="panel">
@@ -663,7 +675,8 @@ function applyTakeHeight(take) {
   if (!(v >= 50 && v <= 260)) { toast('Indiquez la taille en cm, entre 50 et 260', 'error'); return; }
   send({ a: 'take_height', take, cm: v });
 }
-function pickViewer(take, id) { viewerSel = { take, id }; renderTakeDetail(true); }
+window.addEventListener('mc-page', () => { if (S && $('pTakes').classList.contains('on')) renderTakeDetail(true); });
+function pickViewer(take, id) { viewerSel = { take, id, auto: false }; renderTakeDetail(true); }
 document.addEventListener('click', (e) => {
   if (e.target.id === 'vPlay') e.target.textContent = window.mcViewer.toggle() ? 'Pause' : 'Lecture';
 });
@@ -680,30 +693,32 @@ function renderChars() {
   const key = JSON.stringify([S.characters, S.character]);
   if (key === charsKey) return;
   charsKey = key;
-  const rigDefault = !S.character || !S.characters.some(c => c.id === S.character);
-  const rigCard = `<article class="char ${rigDefault ? 'def' : ''}">
+  // personnage par défaut d'abord (Y Bot fourni), puis les fournis, puis les autres
+  const chars = [...S.characters].sort((a, b) => (b.id === S.character) - (a.id === S.character) || (!!b.builtin) - (!!a.builtin));
+  // sans aucun personnage : le rig Mixamo seul, habillé du mannequin
+  const rigCard = chars.length ? '' : `<article class="char def">
       <div class="thumb" data-thumb="__rig">Aperçu…</div>
       <div class="body">
         <div class="nm">Rig Mixamo</div>
-        <div class="meta">Fourni avec MocapCam : 65 os Mixamo, corps et doigts, mannequin pour l'aperçu</div>
+        <div class="meta">65 os Mixamo, corps et doigts, mannequin pour l'aperçu</div>
         <div class="meta">Toujours exporté : prise_XXX.fbx, à la taille de l'acteur</div>
-        <div class="acts">
-          ${rigDefault ? '<span class="ok-t" style="font-size:13px">Sortie par défaut</span>' : `<button class="btn small" onclick="send({a:'character_default',id:''})">Utiliser seul</button>`}
-        </div>
+        <div class="acts"><span class="ok-t" style="font-size:13px">Sortie par défaut</span></div>
       </div>
     </article>`;
-  $('charGrid').innerHTML = rigCard + S.characters.map(c => {
+  $('charGrid').innerHTML = rigCard + chars.map(c => {
     const i = c.info || {};
-    return `<article class="char ${c.id === S.character ? 'def' : ''}">
+    const def = c.id === S.character;
+    return `<article class="char ${def ? 'def' : ''}">
       <div class="thumb" data-thumb="${esc(c.id)}">Aperçu…</div>
       <div class="body">
         <div class="nm">${esc(c.name)}</div>
+        ${c.builtin ? '<div class="meta">Fourni avec MocapCam</div>' : ''}
         <div class="meta">Squelette ${esc(i.kind || '?')}, ${i.mapped ?? '?'} os reconnus${i.fingers ? ', doigts' : ', sans doigts'}</div>
         <div class="meta">${i.meshes ?? 0} maillage${i.meshes > 1 ? 's' : ''}${i.triangles ? `, ${i.triangles >= 10000 ? fr(i.triangles / 1000, 0) + ' k' : fr(i.triangles, 0)} triangles` : ''}${i.height ? `, ${fr(i.height * 100, 0)} cm de haut` : ''}</div>
         <div class="acts">
-          ${c.id === S.character ? '<span class="ok-t" style="font-size:13px">Animé après chaque traitement</span>' : `<button class="btn small" onclick="send({a:'character_default',id:'${esc(c.id)}'})">Animer après chaque traitement</button>`}
+          ${def ? '<span class="ok-t" style="font-size:13px">Par défaut : animé après chaque traitement</span>' : `<button class="btn small" onclick="send({a:'character_default',id:'${esc(c.id)}'})">Utiliser par défaut</button>`}
           <span style="flex:1"></span>
-          <button class="btn small danger" onclick="if(confirm('Supprimer ${esc(c.name)} ?')) send({a:'character_delete',id:'${esc(c.id)}'})">Supprimer</button>
+          ${c.builtin ? '' : `<button class="btn small danger" onclick="if(confirm('Supprimer ${esc(c.name)} ?')) send({a:'character_delete',id:'${esc(c.id)}'})">Supprimer</button>`}
         </div>
       </div>
     </article>`;

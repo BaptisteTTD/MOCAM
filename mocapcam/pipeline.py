@@ -2,7 +2,10 @@
 import itertools
 import json
 import os
+import re
+import shutil
 import time
+import unicodedata
 
 import cv2
 import numpy as np
@@ -25,7 +28,7 @@ DEFAULT_STUDIO = {
     "volume": {"margin": 0.5, "height": 2.3},
     # taille de l'acteur (cm) : le squelette exporté est mis à cette taille (vide = échelle des boules)
     "actor_height_cm": None,
-    "character": "",        # personnage animé après chaque traitement (dossier studio/personnages/<id>)
+    "character": "",        # personnage animé après chaque traitement (studio/personnages/<id>) ; vide : le fourni (Y Bot)
     "blender": "",          # chemin de blender.exe pour l'export FBX (vide = recherche automatique)
     "fbx": True,            # créer <prise>.fbx (squelette Mixamo animé) après le traitement
     "sync_by_motion": True,  # affiner la synchro du bip avec le mouvement de l'acteur
@@ -390,6 +393,80 @@ def get_character(studio_dir, cid):
     return next((c for c in list_characters(studio_dir) if c["id"] == cid), None)
 
 
+# personnages fournis avec le programme (ex. Y Bot de Mixamo) : fichiers posés dans ce dossier,
+# installés tout seuls dans studio/personnages/ et animés par défaut. Ce dossier n'est pas
+# publié sur GitHub (les fichiers Mixamo ne peuvent pas être redistribués tels quels).
+BUNDLED_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "personnages_fournis")
+MODEL_EXTS = (".fbx", ".glb", ".gltf", ".blend")
+
+
+def character_id(name):
+    s = unicodedata.normalize("NFKD", str(name or "")).encode("ascii", "ignore").decode()
+    return (re.sub(r"[^A-Za-z0-9_\-]+", "_", s).strip("_")[:40] or "personnage").lower()
+
+
+def _pretty_name(stem):
+    """« YBot » -> « Y Bot », « x_bot » -> « x bot »."""
+    s = re.sub(r"[_\-]+", " ", stem)
+    return re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])|(?<=[a-z])(?=[A-Z])", " ", s).strip() or stem
+
+
+def default_character(studio_dir, cfg):
+    """Personnage animé après chaque traitement : celui choisi dans Studio, sinon le premier
+    personnage fourni (Y Bot), sinon aucun (le squelette seul est exporté)."""
+    chars = list_characters(studio_dir)
+    cid = (cfg or {}).get("character") or ""
+    if any(c["id"] == cid for c in chars):
+        return cid
+    return next((c["id"] for c in chars if c.get("builtin")), "")
+
+
+def install_bundled_characters(studio_dir, blender=None, log=print, bundled_dir=None):
+    """Installe les personnages du dossier personnages_fournis/ (une fois) et les marque
+    « fournis ». Renvoie les identifiants installés ou mis à jour."""
+    src_dir = bundled_dir or BUNDLED_DIR
+    if not os.path.isdir(src_dir):
+        return []
+    root = characters_dir(studio_dir)
+    os.makedirs(root, exist_ok=True)
+    done = []
+    for fn in sorted(os.listdir(src_dir)):
+        stem, ext = os.path.splitext(fn)
+        if ext.lower() not in MODEL_EXTS:
+            continue
+        cid = character_id(stem)
+        d = os.path.join(root, cid)
+        mf = os.path.join(d, "personnage.json")
+        if os.path.exists(mf):                      # déjà là (importé à la main) : marqué fourni
+            try:
+                with open(mf, encoding="utf-8") as f:
+                    m = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if not m.get("builtin"):
+                m["builtin"] = True
+                if m.get("name") == stem:
+                    m["name"] = _pretty_name(stem)
+                with open(mf, "w", encoding="utf-8") as f:
+                    json.dump(m, f, indent=2, ensure_ascii=False)
+                done.append(cid)
+            continue
+        os.makedirs(d, exist_ok=True)
+        dst = os.path.join(d, fn)
+        shutil.copy2(os.path.join(src_dir, fn), dst)
+        info = fbx.inspect_character(dst, os.path.join(d, "apercu.glb"), blender, log)
+        if not info:
+            shutil.rmtree(d, ignore_errors=True)
+            log(f"personnage fourni {fn} non installé (Blender introuvable ou fichier illisible)")
+            continue
+        with open(mf, "w", encoding="utf-8") as f:
+            json.dump(dict(name=_pretty_name(stem), file=fn, info=info, builtin=True,
+                           created=time.strftime("%Y-%m-%d %H:%M:%S")), f, indent=2, ensure_ascii=False)
+        log(f"personnage fourni installé : {_pretty_name(stem)}")
+        done.append(cid)
+    return done
+
+
 def rig_preview_path(take_dir):
     """Aperçu 3D du rig Mixamo de la prise (avec le mannequin par défaut)."""
     name = os.path.basename(os.path.normpath(take_dir))
@@ -612,7 +689,7 @@ def process_take(studio_dir, take_dir, force=False, manual_delays=None, only_cal
         result = fbx.export(out, os.path.join(take_dir, f"{name}.fbx"),
                             blender=cfg.get("blender") or None, log=log,
                             glb_path=rig_preview_path(take_dir)) or out
-    cid = cfg.get("character")
+    cid = default_character(studio_dir, cfg)
     if cid and result.endswith(".fbx"):
         try:
             animate_character(take_dir, studio_dir, cid, log=log, blender=cfg.get("blender") or None)

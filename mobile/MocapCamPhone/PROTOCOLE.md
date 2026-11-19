@@ -29,7 +29,7 @@ Décalage = c − (s0 + s1)/2, on garde l'échange au plus petit aller-retour.
 | `{"t":"identify"}` | affiche le nom en grand quelques secondes |
 | `{"t":"rename","name":"iphone"}` | change le nom |
 | `{"t":"preview","fps":3}` | cadence de l'aperçu (0 = coupé) |
-| `{"t":"config","fov":0.5,"lens":"ultra"}` | champ de vision en équivalent zoom de l'objectif ×1 (0,5 = ultra grand-angle … 2) ; `lens` pour les apps < 1.1 |
+| `{"t":"config","fov":0.5,"lens":"ultra"}` | champ de vision en équivalent zoom de l'objectif ×1 (de 1 à 0,5 environ = ultra grand-angle ; jamais au-delà de 1 depuis l'app 1.1.1) ; `lens` pour les apps < 1.1 |
 
 ## Messages téléphone -> PC
 - `{"t":"status", ...}` chaque seconde : batterie, stockage, i/s et format réellement obtenus, exposition, état,

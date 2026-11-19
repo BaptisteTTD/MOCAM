@@ -502,6 +502,34 @@ def test_rig_preview(path):
        f"{os.path.getsize(glb) / 1e6:.1f} Mo")
 
 
+def test_default_character():
+    """Personnage fourni (Y Bot) : déjà importé à la main -> marqué fourni et pris par défaut ;
+    un personnage choisi dans Studio reste prioritaire ; un nom inconnu retombe sur Y Bot."""
+    import shutil
+    from mocapcam import pipeline
+    st = os.path.join(OUT, "studio_fourni")
+    src = os.path.join(OUT, "fournis")
+    shutil.rmtree(st, ignore_errors=True)
+    shutil.rmtree(src, ignore_errors=True)
+    for cid, name in (("ybot", "YBot"), ("alpha", "Alpha")):
+        os.makedirs(os.path.join(st, "personnages", cid))
+        with open(os.path.join(st, "personnages", cid, "personnage.json"), "w", encoding="utf-8") as f:
+            json.dump(dict(name=name, file=f"{name}.fbx", info={}), f)
+    os.makedirs(src)
+    open(os.path.join(src, "YBot.fbx"), "wb").close()
+    open(os.path.join(src, "LISEZMOI.txt"), "w").close()
+    done = pipeline.install_bundled_characters(st, blender=None, log=lambda *a: None, bundled_dir=src)
+    yb = pipeline.get_character(st, "ybot")
+    d0 = pipeline.default_character(st, {})
+    d1 = pipeline.default_character(st, {"character": "alpha"})
+    d2 = pipeline.default_character(st, {"character": "supprime"})
+    again = pipeline.install_bundled_characters(st, blender=None, log=lambda *a: None, bundled_dir=src)
+    ok("personnage fourni par défaut (Y Bot)",
+       done == ["ybot"] and yb.get("builtin") and yb["name"] == "Y Bot" and d0 == "ybot" and d1 == "alpha"
+       and d2 == "ybot" and again == [],
+       f"installé {done}, nom « {yb['name']} », défaut {d0} / choisi {d1} / inconnu {d2}")
+
+
 def test_transfer(path):
     """Retarget armature -> armature : FBX MocapCam importé -> personnage Mixamo en A-pose,
     échelle 0,01, tourné de 90°, plus petit (comme un perso téléchargé sur Mixamo)."""
@@ -938,6 +966,7 @@ if __name__ == "__main__":
     test_height(path)
     test_fbx(path)
     test_rig_preview(path)
+    test_default_character()
     test_transfer(path)
     test_rigs(path)
     n_ok = sum(1 for v in RESULTS.values() if v[0])

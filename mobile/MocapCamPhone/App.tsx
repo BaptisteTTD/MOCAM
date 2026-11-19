@@ -45,7 +45,7 @@ import {
   type Settings,
 } from './src/settings'
 
-const APP_VERSION = '1.1.0'
+const APP_VERSION = '1.1.1'
 
 // Erreurs hors affichage (minuteries, callbacks natifs) : on les montre à l'écran
 // au lieu de laisser l'app se fermer.
@@ -298,8 +298,9 @@ function CaptureScreen({
   // caméra virtuelle (LiDAR + grand-angle, double…), qu'on évite.
   const defaultBack = useCameraDevice('back')
   const allDevices = useCameraDevices()
-  // champ de vision, en équivalent zoom de l'objectif principal : ×0,5 (ultra grand-angle,
-  // le plus large), ×0,7, ×1, ×1,5, ×2. Choisi sur le téléphone ou depuis Studio.
+  // champ de vision, en équivalent zoom de l'objectif principal : de ×1 (objectif principal,
+  // sans zoom) à ×0,5 environ (ultra grand-angle). On ne fait qu'élargir, jamais zoomer :
+  // ×1 est le plus serré. Choisi sur le téléphone ou depuis Studio.
   const [fov, setFov] = useState(1)
   const lensSetup = useMemo(() => {
     const back = allDevices.filter((d) => d.position === 'back')
@@ -309,28 +310,37 @@ function CaptureScreen({
       // objectif seul : la caméra « par défaut » de l'iPhone peut être virtuelle (LiDAR, double…)
       wide = physical('wide-angle') ?? back.find((d) => d.type === 'wide-angle') ?? defaultBack
     }
-    const ultraDev = back.find((d) => d.type === 'ultra-wide-angle')
-    // Android : l'ultra grand-angle peut aussi être accessible en zoomant sous ×1
-    const minZ = defaultBack?.minZoom ?? 1
-    const ultraByZoom = !ultraDev && Platform.OS === 'android' && minZ < 0.95
-    const available = !!ultraDev || ultraByZoom
-    const widest = ultraDev ? 0.5 : ultraByZoom ? Math.round(minZ * 10) / 10 : 1
-    const maxW = wide?.maxZoom ?? 2
-    const options = [
-      ...(available ? [widest, Math.round(((widest + 1) / 2) * 10) / 10] : []),
-      1,
-      ...[1.5, 2].filter((z) => z <= maxW + 1e-6),
-    ].filter((v, i, a) => a.indexOf(v) === i)
+    // ultra grand-angle seul (iPhone, certains Android) : son champ par rapport à l'objectif
+    // principal vient des focales (13 mm / 26 mm = ×0,5 ; 16 / 26 ≈ ×0,6), sinon ×0,5
+    const ultraDev = physical('ultra-wide-angle') ?? back.find((d) => d.type === 'ultra-wide-angle')
+    const ratio =
+      ultraDev?.focalLength && wide?.focalLength && ultraDev.focalLength < wide.focalLength
+        ? ultraDev.focalLength / wide.focalLength
+        : 0.5
+    // Android : l'ultra grand-angle peut aussi s'obtenir en zoomant sous ×1 sur la caméra principale
+    const zoomOutDev = !ultraDev && Platform.OS === 'android'
+      ? [defaultBack, ...back].find((d) => d && (d.minZoom ?? 1) < 0.95)
+      : undefined
+    const widest = ultraDev
+      ? Math.max(0.3, Math.round(ratio * 10) / 10)
+      : zoomOutDev
+        ? Math.round(Math.max(0.3, zoomOutDev.minZoom) * 10) / 10
+        : 1
+    // de l'ultra grand-angle à ×1, par pas de 0,1 (5 choix au plus)
+    let options: number[] = [widest]
+    for (let v = Math.round(widest * 10) + 1; v <= 10; v++) options.push(v / 10)
+    if (options.length > 5) options = options.filter((v) => v !== 0.9)
+    if (options.length > 5) options = [options[0], ...options.slice(-4)]
     // le plus proche des choix possibles
     const want = options.reduce((b, v) => (Math.abs(v - fov) < Math.abs(b - fov) ? v : b), options[0])
+    const available = options.length > 1
     if (want < 0.99 && ultraDev) {
-      const z = Math.min(ultraDev.maxZoom ?? 4, Math.max(ultraDev.minZoom ?? 1, want / 0.5))
+      const z = Math.min(ultraDev.maxZoom ?? 4, Math.max(ultraDev.minZoom ?? 1, want / ratio))
       return { device: ultraDev, zoom: z, available, used: 'ultra' as const, fov: want, options }
     }
-    if (want < 0.99 && ultraByZoom && defaultBack)
-      return { device: defaultBack, zoom: Math.max(minZ, want), available, used: 'ultra' as const, fov: want, options }
-    const z = Math.min(maxW, Math.max(1, want))
-    return { device: wide, zoom: z, available, used: 'wide' as const, fov: want, options }
+    if (want < 0.99 && zoomOutDev)
+      return { device: zoomOutDev, zoom: Math.max(zoomOutDev.minZoom, want), available, used: 'ultra' as const, fov: want, options }
+    return { device: wide, zoom: 1, available, used: 'wide' as const, fov: 1, options }
   }, [allDevices, defaultBack, fov])
   const device = lensSetup.device
 
@@ -881,7 +891,10 @@ function CaptureScreen({
       </View>
 
       <View style={styles.bottomBar}>
-        <View style={styles.seg}>
+        {lensSetup.options.length < 2 ? (
+          <Text style={styles.small}>×1 : ce téléphone ne laisse pas l'app élargir le champ</Text>
+        ) : null}
+        <View style={[styles.seg, lensSetup.options.length < 2 ? { display: 'none' } : null]}>
           {lensSetup.options.map((v) => {
             const on = Math.abs(v - lensSetup.fov) < 0.01
             return (
