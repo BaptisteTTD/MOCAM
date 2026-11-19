@@ -852,7 +852,7 @@ function renderFaceDetail(force) {
           <div class="side-h">Traitement</div>
           ${running ? `<div class="hint">En cours${P.step ? ` : étape ${P.step} sur 4` : '…'}</div>${steps}` :
             queued ? '<div class="hint">En attente de son tour.</div>' :
-            `<div class="${f.processed ? 'ok-t' : 'hint'}">${f.processed ? 'Visage traité : 52 blendshapes ARKit' : 'Moins d'une minute pour 20 s de vidéo.'}</div>
+            `<div class="${f.processed ? 'ok-t' : 'hint'}">${f.processed ? 'Visage traité : 52 blendshapes ARKit' : 'Moins d\'une minute pour 20 s de vidéo.'}</div>
              <div><button class="btn ${f.processed ? '' : 'primary'}" onclick="send({a:'face_process',name:'${esc(f.name)}'})" ${f.video ? '' : 'disabled'}>${f.processed ? 'Retraiter' : 'Traiter la vidéo'}</button></div>`}
         </div>
         <div class="panel">

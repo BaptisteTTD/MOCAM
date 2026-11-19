@@ -201,6 +201,8 @@ async def main():
             async with async_playwright() as p:
                 browser = await p.chromium.launch(args=["--autoplay-policy=no-user-gesture-required"])
                 page = await browser.new_page(viewport=dict(width=1500, height=950))
+                page_errors = []
+                page.on("pageerror", lambda e: page_errors.append(str(e)))
                 chirps = []
                 await page.expose_function("onChirp", lambda: chirps.append(time.time() * 1000))
                 await page.add_init_script("window.addEventListener('load',()=>{const o=window.playChirp;"
@@ -212,6 +214,7 @@ async def main():
                 qr_w = await page.evaluate("(() => { const i = document.querySelector('img.qr'); return i ? i.naturalWidth : 0 })()")
                 async with session.get(BASE + "/version") as r:
                     ver = (await r.json()).get("version")
+                ok("page sans erreur JavaScript", not page_errors, "; ".join(page_errors)[:200] or "aucune")
                 ok("interface affichée, QR code visible dès l'ouverture", not fatal and qr_w > 50 and ver,
                    f"version {ver}, QR {qr_w} px")
                 # 2e lancement de la même version : ne casse rien, se contente de rouvrir la fenêtre
