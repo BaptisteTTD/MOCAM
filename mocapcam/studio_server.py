@@ -35,7 +35,7 @@ from . import fbx, markers as mk, pipeline, sync
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "studio_ui")
 # version du serveur : l'interface (index.html) vérifie qu'elle parle au serveur de la même version
-STUDIO_VERSION = "1.4.2"
+STUDIO_VERSION = "1.4.3"
 
 # horloge du PC en ms (monotone, calée sur l'heure système au démarrage)
 _EPOCH = time.time() * 1000 - time.monotonic() * 1000
@@ -1195,7 +1195,7 @@ class Studio:
         app.router.add_post("/character", self.handle_character_upload)
         app.router.add_get("/character/{cid}/apercu.glb", self.handle_character_glb)
         app.router.add_get("/take/{take}/apercu.glb", self.handle_take_glb)
-        for img in ("logo-mocam.png", "favicon.png"):
+        for img in ("logo-mocam.png", "favicon.png", "mocam.ico"):
             app.router.add_get("/" + img, lambda r, img=img: web.FileResponse(
                 os.path.join(UI_DIR, img), headers={"Cache-Control": "max-age=3600"}))
         app.router.add_static("/vendor/", os.path.join(UI_DIR, "vendor"), show_index=False)
@@ -1219,6 +1219,34 @@ def open_window(url):
         except OSError:
             pass
     webbrowser.open(url)
+
+
+def make_shortcuts():
+    """Windows : raccourci « MOCAM Studio » avec l'icône MOCAM, dans le dossier du programme et sur
+    le Bureau (créé une fois ; un .bat ne peut pas avoir d'icône)."""
+    if not sys.platform.startswith("win"):
+        return
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    bat, ico = os.path.join(root, "MOCAM Studio.bat"), os.path.join(UI_DIR, "mocam.ico")
+    if not (os.path.exists(bat) and os.path.exists(ico)):
+        return
+    ps = ("$s=New-Object -ComObject WScript.Shell; "
+          "foreach($d in @($env:MOCAM_ROOT, [Environment]::GetFolderPath('Desktop'))){ "
+          "$p=Join-Path $d 'MOCAM Studio.lnk'; $l=$s.CreateShortcut($p); "
+          "$l.TargetPath=$env:MOCAM_BAT; $l.WorkingDirectory=$env:MOCAM_ROOT; "
+          "$l.IconLocation=$env:MOCAM_ICO; $l.WindowStyle=7; $l.Description='MOCAM Studio'; $l.Save() }")
+    done = os.path.join(root, "studio", ".raccourcis")
+    if os.path.exists(done) and os.path.exists(os.path.join(root, "MOCAM Studio.lnk")):
+        return
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps], timeout=30, capture_output=True,
+                       env=dict(os.environ, MOCAM_ROOT=root, MOCAM_BAT=bat, MOCAM_ICO=ico),
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        os.makedirs(os.path.dirname(done), exist_ok=True)
+        open(done, "w").close()
+        print("  raccourci « MOCAM Studio » (avec son icône) créé sur le Bureau et dans le dossier MOCAM")
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def _port_free(port):
@@ -1299,6 +1327,8 @@ def run(studio_dir, captures_dir, port=8765, open_ui=True):
                                                         " par un autre programme") +
                   " : fermez-le (ou fermez les autres fenêtres noires de MOCAM), puis relancez.")
             return
+    threading_sc = __import__("threading").Thread(target=make_shortcuts, daemon=True)
+    threading_sc.start()
     st = Studio(studio_dir, captures_dir, port)
     print(f"MOCAM Studio {STUDIO_VERSION} : {url}")
     print(f"  réseau : {', '.join(st.net.get('hosts') or lan_addresses())} (port {port}) — connectez les téléphones avec le QR code")
