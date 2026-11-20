@@ -1,4 +1,4 @@
-"""Capture faciale : calibration, visage appris, FBX à 52 blendshapes, transfert sur personnage.
+"""Capture faciale : calibration, visage appris, paupières, FBX à 52 blendshapes, aperçu direct.
 
     python tests/test_visage.py [VIDEO]
 
@@ -66,7 +66,7 @@ def main():
             __import__("shutil").copy(video, fd)
     else:
         Wsrc, names = fake_take(fd)
-        face.write_meta(fd, tete=True)
+        face.write_meta(fd, tete=True, miroir=True)     # anciens réglages : ignorés désormais
     import bpy  # noqa: F401  (Blender en module)
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "blender_addon"))
     import mocapcam_blender as mb
@@ -84,7 +84,10 @@ def main():
         ok("paupière fermée détectée (œil gauche du sujet)", bl[102:109].min() > 0.8 and np.median(bl) < 0.3,
            f"fermé {bl[102:109].min():.2f}, médiane {np.median(bl):.2f}")
         H = np.array(d["head"])
-        ok("rotation de la tête", 18 < H[:, 0].max() - H[:, 0].min() < 30, f"lacet de {H[:, 0].min():.1f}° à {H[:, 0].max():.1f}°")
+        ok("tête toujours fixe", np.abs(H).max() == 0 and d.get("tete") is False,
+           "la tête tourne de ±12° dans la vidéo, rien dans les courbes")
+        sq = W[:, face.ARKIT.index("eyeSquintLeft")]
+        ok("pas de plissement sur un œil fermé", sq[102:109].max() < 0.05, f"plissement max {sq[102:109].max():.2f}")
         j = names.index("jawOpen")
         r = np.corrcoef(Wsrc[:, j], W[:, face.ARKIT.index("jawOpen")])[0, 1]
         ok("lissage sans déformer la courbe", r > 0.97, f"corrélation avec la source {r:.3f}")
@@ -95,10 +98,19 @@ def main():
     allm = max(moved[j].mean() for j in range(52))
     ok("blendshapes limitées à leur zone (tête fixe)", eye < 0.3 and not moved[51].any(),
        f"une forme des yeux bouge au plus {eye * 100:.0f} % des sommets, toute forme au plus {allm * 100:.0f} %")
-    face.write_meta(fd, tete=False)
-    out = face.run(fd, log=lambda *a: None)
-    H0 = np.array(json.load(open(out["json"]))["head"])
-    ok("tête fixe par défaut", np.abs(H0).max() == 0, "rotation désactivée : tête immobile")
+    # yeux : formes géométriques (paupière haute posée sur la basse), regard sans déformation
+    jb = face.ARKIT.index("eyeBlinkLeft")
+    lid = face.LIDS["Left"]
+    nv = np.array(d["face"]["vertices"])
+    up, lo = nv[lid["up"]] + dl[jb][lid["up"]], nv[lid["lo"]] + dl[jb][lid["lo"]]
+    gap0 = np.linalg.norm(nv[lid["up"]] - nv[lid["lo"]], axis=1).mean()
+    look = max(np.abs(dl[face.ARKIT.index(n)]).max() for n in face.ARKIT if n.startswith("eyeLook"))
+    ok("clignement : paupières jointes, sans pli", np.linalg.norm(up - lo, axis=1).max() < 0.01 * gap0 + 1e-9
+       and moved[jb].sum() <= 40 and look == 0,
+       f"{moved[jb].sum()} sommets bougent, écart restant {np.linalg.norm(up - lo, axis=1).max() * 1000:.2f} mm, regard : 0")
+    root = sorted(os.listdir(fd))
+    ok("sorties : FBX seulement (pas de CSV)", not any(f.endswith((".csv", ".json")) for f in root if f != "take.json")
+       and os.path.exists(out["fbx"]), ", ".join(root))
     # FBX : 52 blendshapes animées
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.import_scene.fbx(filepath=out["fbx"])
@@ -108,16 +120,16 @@ def main():
     animated = bool(ks.animation_data and ks.animation_data.action)
     ok("FBX : visage + 52 blendshapes ARKit animées", names_fbx == face.ARKIT and animated,
        f"{len(me.data.vertices)} sommets, {len(names_fbx)} formes, animation {'oui' if animated else 'non'}")
-    # transfert sur un personnage (ici : le visage MOCAM lui-même, renommé façon CC4 « Eye_Blink_L »)
-    char = os.path.join(D, "tete.fbx")
-    for k in ks.key_blocks[1:]:
-        k.name = {"eyeBlinkLeft": "Eye_Blink_L", "jawOpen": "A25_Jaw_Open"}.get(k.name, k.name)
-    if ks.animation_data:
-        ks.animation_data_clear()
-    bpy.ops.export_scene.fbx(filepath=char, use_selection=False)
-    rep = mb.face_character_file(out["json"], char, os.path.join(D, "tete_anime.fbx"))
-    ok("transfert sur les blendshapes d'un personnage", rep["shapes"] == 52 and not rep["missing"],
-       f"{rep['shapes']} formes reliées (noms Eye_Blink_L, A25_Jaw_Open reconnus)")
+    # aperçu direct : une image du téléphone -> 52 valeurs + maillage (si le modèle est là)
+    if os.path.exists(face.MODEL_PATH) and video:
+        cap = cv2.VideoCapture(video)
+        good, fr = cap.read()
+        cap.release()
+        live = face.LiveTracker(log=lambda *a: None)
+        jpg = cv2.imencode(".jpg", cv2.resize(fr, None, fx=640 / max(fr.shape[:2]), fy=640 / max(fr.shape[:2])))[1].tobytes()
+        r = live(jpg)
+        ok("aperçu direct", r["found"] and len(r["w"]) == 52 and len(r["v"]) == 468 * 3,
+           f"image {r['size'][0]}×{r['size'][1]}, {len(face.mesh_triangles())} triangles")
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} tests réussis ; dossier : {D}")
     return 0 if all(RESULTS) else 1
 

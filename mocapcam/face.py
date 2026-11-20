@@ -1,4 +1,4 @@
-"""Capture faciale avec une seule caméra : 52 blendshapes ARKit + rotation de la tête.
+"""Capture faciale avec une seule caméra : 52 blendshapes ARKit, tête fixe.
 
 Suivi : MediaPipe Face Landmarker (478 points 3D, 51 blendshapes, pose de la tête) sur chaque
 image de la vidéo. Puis, pour la qualité :
@@ -11,8 +11,8 @@ image de la vidéo. Puis, pour la qualité :
     elle-même : il bouge comme l'acteur, pour l'aperçu et le FBX.
 
 Sorties dans le dossier de la prise de visage :
-  NOM.json  courbes + visage appris      NOM.csv  format Live Link Face (Unreal, Blender…)
-  NOM.fbx   visage MOCAM animé (52 blendshapes ARKit + os de la tête)
+  NOM.fbx   visage MOCAM animé (52 blendshapes ARKit, tête fixe)
+  mocapcam/NOM.json  courbes + visage appris (aperçu du Studio)
 """
 import json
 import math
@@ -296,10 +296,17 @@ def process(raw, lissage="moyen", intensite=1.0, miroir=False):
         if n.startswith("eyeBlink") and n[8:] in lids:
             # paupières : mesure géométrique (0 à 1) mêlée à MediaPipe ramené à la même échelle
             c = np.clip(0.6 * lids[n[8:]] + 0.4 * np.clip(c / 0.62, 0, 1), 0, 1)
+            c = np.clip(c / 0.88, 0, 1)                         # œil fermé : paupières jointes
         fc, beta = _family(n)
         c = smooth(c, fps, fc * strength, beta)
         out[:, ARKIT.index(n)] = np.clip(c * intensite, 0, 1)
         rest[n] = round(b, 3)
+    # œil fermé : MediaPipe y voit aussi un plissement et un regard vers le bas ; on les retire
+    # pour que les paupières ne se chevauchent pas
+    for s in ("Left", "Right"):
+        b = out[:, ARKIT.index("eyeBlink" + s)]
+        out[:, ARKIT.index("eyeSquint" + s)] *= np.clip(1 - 1.2 * b, 0, 1)
+        out[:, ARKIT.index("eyeWide" + s)] *= np.clip(1 - 1.5 * b, 0, 1)
     head, move = head_motion(raw["mats"], fps, strength)
     if miroir:
         head[:, 0] *= -1
@@ -329,6 +336,45 @@ def _align(P, Q, idx):
     return (P - ma) @ R * sc + mb
 
 
+# paupières : contours appariés de l'angle externe à l'angle interne (côtés du sujet)
+LIDS = {
+    "Right": dict(up=[246, 161, 160, 159, 158, 157, 173], lo=[7, 163, 144, 145, 153, 154, 155],
+                  up2=[247, 30, 29, 27, 28, 56, 190], lo2=[25, 110, 24, 23, 22, 26, 112],
+                  crease=[113, 225, 224, 223, 222, 221, 189]),
+    "Left": dict(up=[466, 388, 387, 386, 385, 384, 398], lo=[249, 390, 373, 374, 380, 381, 382],
+                 up2=[467, 260, 259, 257, 258, 286, 414], lo2=[255, 339, 254, 253, 252, 256, 341],
+                 crease=[342, 445, 444, 443, 442, 441, 413]),
+}
+EYE_GEOM = ("eyeBlink", "eyeWide", "eyeSquint", "eyeLook")
+
+
+def eye_shapes(neutral, miroir=False):
+    """Formes des yeux construites sur la géométrie des paupières (et non apprises) : la paupière
+    supérieure descend sur l'inférieure sans plis, la peau autour suit en douceur. Les formes du
+    regard (eyeLook) ne déforment pas le visage : il n'a pas de globes oculaires."""
+    out = {}
+    for side, L in LIDS.items():
+        s = side if not miroir else ("Left" if side == "Right" else "Right")
+        up, lo = np.array(L["up"]), np.array(L["lo"])
+        gap = neutral[lo] - neutral[up]                    # de la paupière haute vers la basse
+        blink, wide, squint = (np.zeros_like(neutral) for _ in range(3))
+        blink[up] = 0.88 * gap
+        blink[L["up2"]] = 0.62 * gap
+        blink[L["crease"]] = 0.18 * gap
+        blink[lo] = -0.12 * gap
+        blink[L["lo2"]] = -0.05 * gap
+        wide[up] = -0.30 * gap
+        wide[L["up2"]] = -0.22 * gap
+        wide[L["crease"]] = -0.10 * gap
+        squint[lo] = -0.32 * gap
+        squint[L["lo2"]] = -0.20 * gap
+        squint[up] = 0.06 * gap
+        out["eyeBlink" + s], out["eyeWide" + s], out["eyeSquint" + s] = blink, wide, squint
+        for d in ("Down", "In", "Out", "Up"):
+            out[f"eyeLook{d}{s}"] = np.zeros_like(neutral)
+    return out
+
+
 def learn_face(raw, weights, miroir=False):
     """Visage MOCAM : sommets au repos (468, 3) en mètres (repère Blender : x vers la gauche du
     sujet, y vers l'arrière, z en haut) et 52 déformations, apprises par régression sur la prise."""
@@ -349,11 +395,19 @@ def learn_face(raw, weights, miroir=False):
     sc = 0.19 / max(1e-6, np.linalg.norm(ref[10] - ref[152]))
     A = (A - ref[[1]]) * sc                                # origine au bout du nez
     neutral = (ref - ref[[1]]) * sc
-    D = (A - neutral).reshape(len(A), -1)
-    X = Wt
+    # yeux : formes géométriques, retirées des mouvements observés avant d'apprendre les autres
+    eyes = eye_shapes(neutral, miroir)
+    geo = [j for j, n in enumerate(ARKIT) if n in eyes]
+    rest = [j for j, n in enumerate(ARKIT) if n not in eyes]
+    E = np.stack([eyes[ARKIT[j]] for j in geo]).reshape(len(geo), -1)
+    D = (A - neutral).reshape(len(A), -1) - Wt[:, geo] @ E
+    X = Wt[:, rest]
     lam = 1e-2 * max(1e-6, float(np.mean(np.diag(X.T @ X)))) + 1e-4 * len(X)
-    delta = np.linalg.solve(X.T @ X + lam * np.eye(X.shape[1]), X.T @ D).reshape(len(ARKIT), 468, 3)
-    delta = localize(delta, neutral, miroir)
+    delta = np.zeros((len(ARKIT), 468 * 3))
+    delta[rest] = np.linalg.solve(X.T @ X + lam * np.eye(X.shape[1]), X.T @ D)
+    delta = localize(delta.reshape(len(ARKIT), 468, 3), neutral, miroir)
+    for j in geo:
+        delta[j] = eyes[ARKIT[j]]
     # repère Blender (le sujet regarde vers -Y) : x image -> +X (gauche du sujet), haut -> +Z,
     # vers la caméra -> -Y ; vidéo en miroir : x inversé
     def to_b(v):
@@ -439,27 +493,6 @@ def localize(delta, neutral, miroir=False):
 
 
 # ------------------------------------------------------------------------------------- sorties
-def write_csv(path, weights, head, fps):
-    """Format Live Link Face (Epic Games) : Timecode, BlendShapeCount, 52 formes, tête, yeux."""
-    cols = [n[0].upper() + n[1:] for n in ARKIT] + ["HeadYaw", "HeadPitch", "HeadRoll", "LeftEyeYaw",
-                                                    "LeftEyePitch", "LeftEyeRoll", "RightEyeYaw",
-                                                    "RightEyePitch", "RightEyeRoll"]
-    g = {n: weights[:, ARKIT.index(n)] for n in ARKIT}
-    eye = lambda s: ((g[f"eyeLookOut{s}"] - g[f"eyeLookIn{s}"]) * (1 if s == "Left" else -1) * 0.5,
-                     (g[f"eyeLookUp{s}"] - g[f"eyeLookDown{s}"]) * 0.5)
-    ly, lp = eye("Left")
-    ry, rp = eye("Right")
-    with open(path, "w", encoding="utf-8", newline="") as f:
-        f.write("Timecode,BlendShapeCount," + ",".join(cols) + "\n")
-        for i in range(len(weights)):
-            t = i / fps
-            fr = int(round((t % 1) * fps))
-            tc = time.strftime("%H:%M:%S", time.gmtime(int(t))) + f":{fr:02d}.{int((t % 1) * 1000):03d}"
-            hd = np.radians(head[i])
-            vals = list(weights[i]) + [hd[0], hd[1], hd[2], ly[i], lp[i], 0.0, ry[i], rp[i], 0.0]
-            f.write(f"{tc},{len(cols)}," + ",".join(f"{v:.4f}" for v in vals) + "\n")
-
-
 def face_dir_take(face_dir):
     return os.path.basename(os.path.normpath(face_dir))
 
@@ -473,14 +506,16 @@ def find_video(face_dir):
 
 def outputs(face_dir):
     n = face_dir_take(face_dir)
-    return dict(json=os.path.join(face_dir, f"{n}.json"), csv=os.path.join(face_dir, f"{n}.csv"),
+    return dict(json=os.path.join(face_dir, "mocapcam", f"{n}.json"),
                 fbx=os.path.join(face_dir, f"{n}.fbx"), glb=os.path.join(face_dir, "mocapcam", f"{n}.glb"),
                 raw=os.path.join(face_dir, "mocapcam", f"{n}_suivi.npz"))
 
 
-def character_outputs(face_dir, cid):
-    n = face_dir_take(face_dir)
-    return (os.path.join(face_dir, f"{n}_{cid}.fbx"), os.path.join(face_dir, "mocapcam", f"{n}_{cid}.glb"))
+def curves_path(face_dir):
+    """Courbes et visage appris (prises traitées avant la 1.7 : à la racine du dossier)."""
+    p = outputs(face_dir)["json"]
+    old = os.path.join(face_dir, f"{face_dir_take(face_dir)}.json")
+    return p if os.path.exists(p) or not os.path.exists(old) else old
 
 
 def read_meta(face_dir):
@@ -500,21 +535,20 @@ def write_meta(face_dir, **kw):
     return m
 
 
-def run(face_dir, studio_dir=None, blender=None, log=print, retrack=False, character=None):
-    """Traitement complet d'une prise de visage (étapes « N/4 » pour MOCAM Studio)."""
+def run(face_dir, studio_dir=None, blender=None, log=print, retrack=False):
+    """Traitement complet d'une prise de visage (étapes « N/3 » pour MOCAM Studio). La tête reste
+    fixe et la vidéo est lue telle quelle (non inversée) : seules les expressions sont animées."""
     from . import fbx as fbxmod
-    from . import pipeline
     out = outputs(face_dir)
     meta = read_meta(face_dir)
     lissage = meta.get("lissage", "moyen")
     intensite = float(meta.get("intensite", 100)) / 100.0
-    miroir = bool(meta.get("miroir", False))
-    tete = bool(meta.get("tete", False))     # rotation de la tête : désactivée = visage fixe
+    miroir = False
     video = find_video(face_dir)
     if not video:
         raise RuntimeError("pas de vidéo dans ce dossier")
     os.makedirs(os.path.dirname(out["raw"]), exist_ok=True)
-    log("1/4 suivi du visage, image par image")
+    log("1/3 suivi du visage, image par image")
     if retrack or not os.path.exists(out["raw"]) or os.path.getmtime(out["raw"]) < os.path.getmtime(video):
         last = [0.0]
 
@@ -534,49 +568,82 @@ def run(face_dir, studio_dir=None, blender=None, log=print, retrack=False, chara
     n = len(raw["t"])
     found = int(raw["ok"].sum())
     log(f"    visage trouvé sur {found} images sur {n} ({100 * found / max(1, n):.0f} %) à {raw['fps']:.0f} i/s")
-    log(f"2/4 calibration et lissage ({lissage}, intensité {intensite * 100:.0f} %)")
+    log(f"2/3 calibration et lissage ({lissage}, intensité {intensite * 100:.0f} %)")
     W, head, move, rest = process(raw, lissage, intensite, miroir)
-    if not tete:
-        head = np.zeros_like(head)
-        move = np.zeros_like(move)
+    head = np.zeros_like(head)               # tête toujours fixe
+    move = np.zeros_like(move)
     neutral, delta, tris = learn_face(raw, W, miroir)
     data = dict(fps=raw["fps"], frames=n, names=ARKIT, weights=np.round(W, 4).tolist(),
                 head=np.round(head, 3).tolist(), move_cm=np.round(move, 3).tolist(), rest=rest,
-                found=found, lissage=lissage, intensite=round(intensite * 100), miroir=miroir, tete=tete,
+                found=found, lissage=lissage, intensite=round(intensite * 100), tete=False,
                 face=dict(vertices=np.round(neutral, 5).tolist(), triangles=tris,
                           deltas=np.round(delta, 5).tolist()))
+    for old in (f"{face_dir_take(face_dir)}.json", f"{face_dir_take(face_dir)}.csv"):   # anciennes versions
+        if os.path.exists(os.path.join(face_dir, old)):
+            os.remove(os.path.join(face_dir, old))
     with open(out["json"], "w", encoding="utf-8") as f:
         json.dump(data, f, separators=(",", ":"))
-    write_csv(out["csv"], W, head, raw["fps"])
     peak = sorted(((float(W[:, i].max()), nm) for i, nm in enumerate(ARKIT)), reverse=True)[:5]
     log("    formes les plus actives : " + ", ".join(f"{nm} {v * 100:.0f} %" for v, nm in peak))
-    log("3/4 FBX du visage MOCAM (52 blendshapes ARKit)")
+    log("3/3 FBX du visage MOCAM (52 blendshapes ARKit)")
     res = fbxmod.face_export(out["json"], out["fbx"], out["glb"], blender=blender, log=log)
     if not res:
-        log("    FBX non créé (Blender introuvable) : le CSV et le JSON sont prêts")
-    cid = character
-    if cid is None and studio_dir:
-        cid = (pipeline.load_studio(studio_dir) or {}).get("face_character") or ""
-    log("4/4 personnage")
-    if cid and studio_dir:
-        animate_character(face_dir, studio_dir, cid, blender=blender, log=log)
-    else:
-        log("    aucun personnage à blendshapes choisi")
+        log("    FBX non créé : Blender est introuvable")
     write_meta(face_dir, processed=time.strftime("%Y-%m-%d %H:%M:%S"), frames=n, fps=raw["fps"])
     log("Terminé")
     return out
 
 
-def animate_character(face_dir, studio_dir, cid, blender=None, log=print):
-    from . import fbx as fbxmod
-    from . import pipeline
-    ch = pipeline.get_character(studio_dir, cid)
-    if not ch:
-        raise RuntimeError(f"personnage inconnu : {cid}")
-    src = os.path.join(pipeline.characters_dir(studio_dir), cid, ch["file"])
-    o_fbx, o_glb = character_outputs(face_dir, cid)
-    rep = fbxmod.face_character(outputs(face_dir)["json"], src, o_fbx, o_glb, blender=blender, log=log)
-    if rep:
-        log(f"    {ch.get('name', cid)} animé : {rep.get('shapes', '?')} blendshapes reliées sur "
-            f"{rep.get('meshes', '?')} maillage(s)" + (", tête animée" if rep.get("head") else ""))
-    return rep
+# ------------------------------------------------------------------------------------- aperçu direct
+class LiveTracker:
+    """Suivi image par image de l'aperçu envoyé par le téléphone (MOCAM Studio, onglet Visage) :
+    52 valeurs ARKit et le maillage du visage, tête fixe (rotation et déplacement retirés)."""
+
+    def __init__(self, log=print):
+        self.log = log
+        self.det = None
+        self.ref = None
+        self.t0 = time.monotonic()
+
+    def reset(self):
+        self.ref = None
+
+    def _open(self):
+        mp, BaseOptions, fl, Mode = _mediapipe(self.log)
+        opts = fl.FaceLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path=ensure_model(self.log)), running_mode=Mode.VIDEO,
+            num_faces=1, min_face_detection_confidence=0.4, min_face_presence_confidence=0.4,
+            min_tracking_confidence=0.4, output_face_blendshapes=True)
+        self.mp = mp
+        self.det = fl.FaceLandmarker.create_from_options(opts)
+
+    def __call__(self, jpg):
+        import cv2
+        if self.det is None:
+            self._open()
+        img = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            return None
+        h, w = img.shape[:2]
+        r = self.det.detect_for_video(self.mp.Image(image_format=self.mp.ImageFormat.SRGB,
+                                                    data=cv2.cvtColor(img, cv2.COLOR_BGR2RGB)),
+                                      int((time.monotonic() - self.t0) * 1000))
+        if not r.face_blendshapes:
+            return dict(found=False, size=[w, h])
+        sc = {c.category_name: c.score for c in r.face_blendshapes[0]}
+        wts = [float(np.clip(sc.get(n, 0.0), 0, 1)) for n in ARKIT]
+        for s in ("Left", "Right"):            # MediaPipe plafonne vers 0,6 pour un œil fermé
+            j = ARKIT.index("eyeBlink" + s)
+            wts[j] = float(np.clip((wts[j] - 0.1) / 0.5, 0, 1))
+        lm = np.array([[p.x * w, -p.y * h, -p.z * w] for p in r.face_landmarks[0][:468]])
+        if self.ref is None:
+            self.ref = lm
+        A = _align(lm, self.ref, STABLE)
+        k = 0.19 / max(1e-6, np.linalg.norm(A[10] - A[152]))
+        A = (A - A[[1]]) * k
+        return dict(found=True, size=[w, h], w=[round(x, 3) for x in wts],
+                    v=np.round(A.reshape(-1), 4).tolist())
+
+
+def mesh_triangles():
+    return _triangles()

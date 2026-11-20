@@ -54,6 +54,7 @@ class FakePhone:
         self.ws = None
         self.recording = False
         self.fov = 1.0
+        self.preview_fps = None
         self.snapshots = 0
         # le poco « rate » la première demande d'image (occupé à envoyer l'aperçu) :
         # Studio doit la redemander tout seul
@@ -112,6 +113,8 @@ class FakePhone:
                 if self.ignore_first_snapshot and self.snapshots == 1:
                     continue
                 await self.send_bin(2, self.frame, 92)
+            elif t == "preview":
+                self.preview_fps = m.get("fps")
             elif t == "start":
                 asyncio.create_task(self.start(m))
             elif t == "stop":
@@ -356,6 +359,37 @@ async def main():
                 ok("capture du visage avec une seule caméra", one and vid and fmeta.get("kind") == "visage"
                    and any(f["name"] == names[0] for f in stx["faces"]),
                    f"{names[0] if vid else '?'} : {vid}, caméra {fmeta.get('camera')}, {len(stx['faces'])} visage(s) listé(s)")
+                # bouton REC de l'app (mode Visage) : un appui démarre, un second arrête
+                ph = phones[1]
+                await page.wait_for_timeout(1500)
+                n0 = len(os.listdir(fdir))
+                await ph.ws.send_str(json.dumps(dict(t="face_record")))
+                await page.wait_for_timeout(3000)
+                stx = await ui_state(session)
+                started = stx["take"] and stx["take"].get("kind") == "visage" and stx["take"]["state"] == "recording"
+                await ph.ws.send_str(json.dumps(dict(t="face_record")))
+                for _ in range(40):
+                    await page.wait_for_timeout(500)
+                    if len(os.listdir(fdir)) > n0 and (await ui_state(session))["take"]["state"] == "ready":
+                        break
+                ok("bouton REC de l'app : capture du visage", started and len(os.listdir(fdir)) == n0 + 1,
+                   f"{len(os.listdir(fdir)) - n0} nouvelle(s) capture(s), état {(await ui_state(session))['take']['state']}")
+                # aperçu en direct : image du téléphone suivie, aperçu plus rapide, et rendu à la fermeture
+                await page.locator(".tab", has_text="Visage").click()
+                await page.evaluate(f"faceCam = '{[c for c in stx['cams'] if c['name'] == ph.name][0]['id']}'; selectFace(LIVE)")
+                seen = ""
+                for _ in range(30):
+                    await page.wait_for_timeout(500)
+                    seen = await page.locator("#faceLiveState").text_content() or ""
+                    if seen:
+                        break
+                live_img = await page.locator("#faceLiveImg").count()
+                fps_live = ph.preview_fps
+                await page.evaluate("showPage('pTakes')")
+                await page.wait_for_timeout(1500)
+                ok("aperçu en direct du visage", live_img == 1 and fps_live == 10 and ph.preview_fps not in (None, 10)
+                   and "visage" in seen.lower(),
+                   f"aperçu à {fps_live} i/s puis {ph.preview_fps} i/s ; « {seen[:70]} »")
                 # « Ouvrir le dossier » ne coupe pas la connexion ; suppression d'une prise
                 await page.locator("#takeDetail button", has_text="Ouvrir le dossier").click()
                 await page.wait_for_timeout(1500)

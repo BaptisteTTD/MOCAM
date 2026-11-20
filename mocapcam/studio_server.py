@@ -35,7 +35,7 @@ from . import fbx, markers as mk, pipeline, sync
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "studio_ui")
 # version du serveur : l'interface (index.html) vérifie qu'elle parle au serveur de la même version
-STUDIO_VERSION = "1.6.0"
+STUDIO_VERSION = "1.7.0"
 
 # horloge du PC en ms (monotone, calée sur l'heure système au démarrage)
 _EPOCH = time.time() * 1000 - time.monotonic() * 1000
@@ -254,6 +254,10 @@ class Studio:
         self.prefer60 = True        # priorité à 60 i/s (720p si le téléphone l'exige)
         self.fov_by_name = self._load_fov()     # champ de vision choisi par caméra (×0,5 … ×1)
         self.preview_fps = 3.0
+        self.face_live = None          # caméra suivie en direct dans l'onglet Visage
+        self.face_live_busy = False
+        self.face_tracker = None
+        self.face_pool = None
         self.net = dict(hosts=lan_addresses(), ssid=None, public=False, firewall_rule=None, adapters=[])
         self.queue = []             # traitements en attente
         self.char_busy = None       # import de personnage en cours
@@ -366,15 +370,11 @@ class Studio:
             meta = facemod.read_meta(p)
             vid = facemod.find_video(p)
             o = facemod.outputs(p)
-            chars = [c[len(d) + 1:-4] for c in os.listdir(p) if c.startswith(d + "_") and c.endswith(".fbx")
-                     and os.path.exists(facemod.character_outputs(p, c[len(d) + 1:-4])[1])]
             out.append(dict(name=d, video=os.path.basename(vid) if vid else None, created=meta.get("created"),
                             duration=meta.get("duration_s"), camera=meta.get("camera"),
-                            processed=os.path.exists(o["json"]), fbx=os.path.exists(o["fbx"]),
-                            csv=os.path.exists(o["csv"]), glb=os.path.exists(o["glb"]),
-                            frames=meta.get("frames"), fps=meta.get("fps"), characters=chars,
-                            lissage=meta.get("lissage", "moyen"), intensite=meta.get("intensite", 100),
-                            miroir=bool(meta.get("miroir", False)), tete=bool(meta.get("tete", False))))
+                            processed=os.path.exists(facemod.curves_path(p)), fbx=os.path.exists(o["fbx"]),
+                            glb=os.path.exists(o["glb"]), frames=meta.get("frames"), fps=meta.get("fps"),
+                            lissage=meta.get("lissage", "moyen"), intensite=meta.get("intensite", 100)))
         return out[:80]
 
     def next_face_name(self):
@@ -410,7 +410,7 @@ class Studio:
             actor_height_cm=cfg.get("actor_height_cm"),
             characters=pipeline.list_characters(self.studio_dir),
             character=pipeline.default_character(self.studio_dir, cfg),
-            faces=self.faces_list(), face_character=cfg.get("face_character") or "",
+            faces=self.faces_list(),
             next_face=self.next_face_name(),
             char_busy=self.char_busy, blender=self.has_blender, version=STUDIO_VERSION,
         )
@@ -560,6 +560,18 @@ class Studio:
                 cam.take["state"] = "error"
             await self.toast(f"{cam.name} : {m.get('message')}", "error")
             self.changed()
+        elif t == "face_record":          # bouton REC de l'app (mode Visage)
+            busy = self.take and self.take["state"] in ("starting", "recording", "stopping")
+            if busy and self.take.get("kind") == "visage" and cam.id in self.take.get("cams", []):
+                await self.stop_take()
+            elif busy:
+                await self.send(cam, dict(t="error", message="un enregistrement est déjà en cours"))
+                await self.toast(f"{cam.name} : un enregistrement est déjà en cours", "warn")
+            else:
+                await self.start_take("", cam_id=cam.id, kind="visage")
+        elif t == "face_stop":
+            if self.take and self.take.get("kind") == "visage" and cam.id in self.take.get("cams", []):
+                await self.stop_take()
         elif t == "locked":
             cam.locked = bool(m.get("ok"))
             if m.get("message"):
@@ -573,6 +585,8 @@ class Studio:
         if kind == 1:
             cam.preview, cam.preview_ts = jpg, now_ms()
             await self.broadcast(dict(type="preview", cam=cam.id, ts=cam.preview_ts))
+            if cam.id == self.face_live and not self.face_live_busy:
+                asyncio.ensure_future(self.track_live(cam, jpg))
         elif kind == 2:
             seq = cam.check_seq
             cam.check = dict(pending=True, analysing=True, tries=(cam.check or {}).get("tries", 1))
@@ -930,8 +944,6 @@ class Studio:
         d = job.get("dir") or os.path.join(self.captures_dir, take)
         if kind == "visage":
             cmd = ["visage", d, "--studio", self.studio_dir]
-        elif kind == "visage_perso":
-            cmd = ["visage-perso", self.studio_dir, d, job["args"][0]]
         elif kind == "traiter":
             cmd = ["traiter", self.studio_dir, d]
         elif kind == "taille":
@@ -949,7 +961,7 @@ class Studio:
         self.proc["pid"] = p.pid
         async for raw in p.stdout:
             line = raw.decode("utf-8", "replace").rstrip()
-            m = re.match(r"\s*(\d)/([46]) (.+)", line)
+            m = re.match(r"\s*(\d)/([346]) (.+)", line)
             if m:
                 self.proc.update(step=int(m.group(1)), steps=int(m.group(2)), step_label=m.group(3).rstrip("…. "))
                 self.changed()
@@ -959,8 +971,7 @@ class Studio:
         if rc == 0:
             lab = job["label"][:1].lower() + job["label"][1:]     # « animation de Y Bot »
             done = {"traiter": f"Prise {take} traitée", "taille": f"{take} : {lab} terminée",
-                    "animer": f"{take} : {lab} terminée", "visage": f"Visage {take} traité",
-                    "visage_perso": f"{take} : {lab} terminée"}[kind]
+                    "animer": f"{take} : {lab} terminée", "visage": f"Visage {take} traité"}[kind]
             await self.toast(done, "ok")
         else:
             await self.toast(f"Échec : {job['label'].lower()} de {take} (voir le journal dans Prises)", "error")
@@ -1014,8 +1025,6 @@ class Studio:
             with open(os.path.join(d, "personnage.json"), "w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=2, ensure_ascii=False)
             # premier personnage, sans personnage fourni (Y Bot) : il devient celui par défaut
-            if info.get("arkit") and not self.cfg().get("face_character"):
-                self.save_cfg_value("face_character", cid)      # visage : animé après chaque capture
             if not info.get("face_only") and not self.cfg().get("character") and not any(c.get("builtin") for c in pipeline.list_characters(self.studio_dir)):
                 self.save_cfg_value("character", cid)
             await self.toast(f"Personnage « {meta['name']} » ajouté : squelette {info.get('kind')}, "
@@ -1091,8 +1100,7 @@ class Studio:
     async def handle_face_glb(self, request):
         from . import face as facemod
         _, d = self.face_path(request)
-        c = request.rel_url.query.get("c", "")
-        p = facemod.character_outputs(d, safe_name(c).lower())[1] if c else facemod.outputs(d)["glb"]
+        p = facemod.outputs(d)["glb"]
         if not os.path.exists(p):
             raise web.HTTPNotFound()
         return web.FileResponse(p, headers={"Cache-Control": "no-store"})
@@ -1101,7 +1109,7 @@ class Studio:
         """Courbes de la prise de visage pour l'interface (sans le maillage appris)."""
         from . import face as facemod
         _, d = self.face_path(request)
-        p = facemod.outputs(d)["json"]
+        p = facemod.curves_path(d)
         if not os.path.exists(p):
             raise web.HTTPNotFound()
 
@@ -1136,11 +1144,50 @@ class Studio:
         self.changed()
         return web.json_response(dict(ok=True, name=name))
 
+    async def track_live(self, cam, jpg):
+        """Aperçu direct du visage : suivi de l'image d'aperçu, valeurs envoyées à l'interface."""
+        from concurrent.futures import ThreadPoolExecutor
+        from . import face as facemod
+        self.face_live_busy = True
+        try:
+            if self.face_pool is None:
+                self.face_pool = ThreadPoolExecutor(1)       # MediaPipe : toujours le même fil
+                self.face_tracker = facemod.LiveTracker(log=lambda *a: None)
+            res = await asyncio.get_running_loop().run_in_executor(self.face_pool, self.face_tracker, jpg)
+            if res is not None and cam.id == self.face_live:
+                await self.broadcast(dict(type="face_live", cam=cam.id, **res))
+        except Exception as e:  # noqa: BLE001  MediaPipe absent, image illisible…
+            await self.broadcast(dict(type="face_live", cam=cam.id, found=False, error=str(e)[:200]))
+        finally:
+            self.face_live_busy = False
+
+    async def set_face_live(self, cam_id):
+        old = self.face_live
+        if old == cam_id:
+            return
+        self.face_live = cam_id if cam_id in self.cams else None
+        if old in self.cams:
+            await self.send(self.cams[old], dict(t="preview", fps=self.preview_fps))
+        if self.face_live:
+            if self.face_tracker:
+                self.face_tracker.reset()
+            await self.send(self.cams[self.face_live], dict(t="preview", fps=max(self.preview_fps, 10.0)))
+
+    async def handle_face_mesh(self, request):
+        from . import face as facemod
+        try:
+            tris = await asyncio.get_running_loop().run_in_executor(None, facemod.mesh_triangles)
+        except Exception:  # noqa: BLE001
+            raise web.HTTPServiceUnavailable()
+        return web.json_response(dict(triangles=tris), headers={"Cache-Control": "max-age=3600"})
+
     async def on_face_ui(self, a, m):
         from . import face as facemod
         name = safe_name(m["name"]) if m.get("name") else ""
         d = os.path.join(self.faces_dir, name) if name else None
-        if a == "face_facing":
+        if a == "face_live":
+            await self.set_face_live(m.get("cam") if m.get("on") else None)
+        elif a == "face_facing":
             c = self.cams.get(m.get("cam"))
             if c:
                 await self.send(c, dict(t="config", facing="front" if m.get("facing") == "front" else "back"))
@@ -1156,10 +1203,6 @@ class Studio:
                 kw["lissage"] = m["lissage"]
             if isinstance(m.get("intensite"), (int, float)):
                 kw["intensite"] = int(min(150, max(50, m["intensite"])))
-            if isinstance(m.get("miroir"), bool):
-                kw["miroir"] = m["miroir"]
-            if isinstance(m.get("tete"), bool):
-                kw["tete"] = m["tete"]
             facemod.write_meta(d, **kw)
             if m.get("apply"):
                 await self.enqueue_face("visage", name)
@@ -1178,16 +1221,6 @@ class Studio:
             how = await asyncio.get_running_loop().run_in_executor(None, self.delete_dir, d)
             self.changed()
             await self.toast(f"Visage {name} " + ("mis à la corbeille" if how == "corbeille" else "supprimé"), "ok")
-        elif a == "face_character_default":
-            self.save_cfg_value("face_character", safe_name(m.get("id", "")).lower() if m.get("id") else "")
-            self.changed()
-        elif a == "face_animate" and d:
-            cid = safe_name(m.get("id", "")).lower()
-            ch = pipeline.get_character(self.studio_dir, cid)
-            if not ch:
-                await self.toast("Choisissez un personnage", "warn")
-                return
-            await self.enqueue_face("visage_perso", name, [cid], label=f"Visage sur {ch.get('name', cid)}")
 
     async def handle_ui(self, request):
         ws = web.WebSocketResponse(heartbeat=20)
@@ -1397,6 +1430,7 @@ class Studio:
     def app(self):
         app = web.Application(client_max_size=8 * 1024 ** 3)
         app.router.add_get("/", self.handle_index)
+        app.router.add_get("/visage-maillage.json", self.handle_face_mesh)
         app.router.add_get("/visage/{name}/video", self.handle_face_video)
         app.router.add_get("/visage/{name}/apercu.glb", self.handle_face_glb)
         app.router.add_get("/visage/{name}/courbes.json", self.handle_face_curves)

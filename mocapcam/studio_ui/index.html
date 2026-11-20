@@ -79,7 +79,13 @@
   .face-new .prev img { width: 100%; height: 100%; object-fit: cover; }
   .face-new .row2 { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .face-view { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .face-view video, .face-view .viewer { width: 100%; aspect-ratio: 3 / 4; border-radius: var(--r-view); background: #0e1116; object-fit: contain; }
+  .face-view { --ar: 3 / 4; align-items: start; }
+  .face-view video, .face-view .viewer, .face-view .cam { width: 100%; aspect-ratio: var(--ar); max-height: calc(100vh - 260px); border-radius: var(--r-view); background: #0e1116; object-fit: contain; }
+  .face-view .cam { display: grid; place-items: center; overflow: hidden; color: var(--faint); font-size: 13px; }
+  .face-view .cam img { width: 100%; height: 100%; object-fit: contain; }
+  .face-new .prev { cursor: pointer; position: relative; }
+  .face-new .prev .open { position: absolute; left: 8px; bottom: 8px; background: rgba(0,0,0,.6); color: #fff; font-size: 12px; padding: 3px 8px; border-radius: 6px; }
+  .tk.live .n::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok, #3ddc84); margin-right: 8px; }
   .bars { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 3px 18px; }
   .bars h4 { grid-column: 1 / -1; margin: 10px 0 2px; font-size: 12.5px; color: var(--muted); font-weight: 600; }
   .bar { display: grid; grid-template-columns: 118px 1fr; gap: 8px; align-items: center; font-size: 11.5px; color: var(--muted); }
@@ -333,7 +339,7 @@
 <script>
 let ws, S = null, serverDelta = 0, takeTyped = false, selTake = null, logText = '';
 const autoAnimated = new Set();   // prises où le personnage par défaut a été lancé automatiquement
-const UI_VERSION = '1.6.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
+const UI_VERSION = '1.7.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
 function newerVersion(a, b) {
   const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
   for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
@@ -372,7 +378,8 @@ function connect() {
       try { render(); }
       catch (e) { console.error(e); fatal('Erreur d\'affichage', `${e.message}\n\nRelancez MOCAM Studio.bat. Si l'erreur revient, envoyez ce message.`); }
     }
-    else if (m.type === 'preview') { const img = document.querySelector(`img[data-prev="${m.cam}"]`); if (img) img.src = `/preview/${m.cam}?t=${m.ts}`; }
+    else if (m.type === 'preview') { document.querySelectorAll(`img[data-prev="${m.cam}"]`).forEach(img => { img.src = `/preview/${m.cam}?t=${m.ts}`; }); }
+    else if (m.type === 'face_live') faceLiveData(m);
     else if (m.type === 'log') { if (m.reset) logText = ''; logText += m.line + '\n'; for (const l of [$('log'), $('faceLog')]) if (l) { l.textContent = logText; l.scrollTop = l.scrollHeight; } }
     else if (m.type === 'toast') toast(m.msg, m.level);
     else if (m.type === 'play_chirp') playChirp();
@@ -403,6 +410,7 @@ function showPage(id) {
   document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', b.dataset.page === id));
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('on', p.id === id));
   window.dispatchEvent(new Event('mc-page'));
+  faceLiveSync();
 }
 $('btnSettings').onclick = () => $('drawer').classList.toggle('on');
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { $('drawer').classList.remove('on'); $('modal').classList.remove('on'); } });
@@ -625,7 +633,7 @@ function renderTakeDetail(force) {
   const oldBox = $('viewerBox');
   if (oldBox) oldBox.remove();
   if (!t) { box.innerHTML = '<div class="empty-page">Les prises filmées apparaissent ici.</div>'; return; }
-  const chars = S.characters.filter(c => !(c.info && c.info.face_only));   // têtes seules : onglet Visage
+  const chars = S.characters.filter(c => !(c.info && c.info.face_only));   // têtes seules : pas de squelette à animer
   const animated = chars.filter(c => t.characters.includes(c.id));
   // personnage par défaut en premier
   animated.sort((a, b) => (b.id === S.character) - (a.id === S.character));
@@ -741,7 +749,7 @@ function renderChars() {
         <div class="meta">${i.face_only ? 'Visage seul' : `Squelette ${esc(i.kind || '?')}, ${i.mapped ?? '?'} os reconnus${i.fingers ? ', doigts' : ', sans doigts'}`}${i.arkit ? `, ${i.arkit} blendshapes ARKit` : ''}</div>
         <div class="meta">${i.meshes ?? 0} maillage${i.meshes > 1 ? 's' : ''}${i.triangles ? `, ${i.triangles >= 10000 ? fr(i.triangles / 1000, 0) + ' k' : fr(i.triangles, 0)} triangles` : ''}${i.height ? `, ${fr(i.height * 100, 0)} cm de haut` : ''}</div>
         <div class="acts">
-          ${i.face_only ? `<span class="hint" style="font-size:13px">Tête seule : pour la capture du visage</span>` : def ? '<span class="ok-t" style="font-size:13px">Par défaut : animé après chaque traitement</span>' : `<button class="btn small" onclick="send({a:'character_default',id:'${esc(c.id)}'})">Utiliser par défaut</button>`}
+          ${i.face_only ? `<span class="hint" style="font-size:13px">Pas de squelette : ne peut pas être animé par la capture du corps</span>` : def ? '<span class="ok-t" style="font-size:13px">Par défaut : animé après chaque traitement</span>' : `<button class="btn small" onclick="send({a:'character_default',id:'${esc(c.id)}'})">Utiliser par défaut</button>`}
           <span style="flex:1"></span>
           ${c.builtin ? '' : `<button class="btn small danger" onclick="if(confirm('Supprimer ${esc(c.name)} ?')) send({a:'character_delete',id:'${esc(c.id)}'})">Supprimer</button>`}
         </div>
@@ -768,7 +776,8 @@ drop.addEventListener('drop', (e) => uploadChar(e.dataTransfer.files[0]));
 
 
 // ---------------------------------------------------------------- capture faciale
-const FACE_STEPS = ['Suivi du visage', 'Calibration et lissage', 'FBX du visage', 'Personnage'];
+const FACE_STEPS = ['Suivi du visage', 'Calibration et lissage', 'FBX du visage'];
+const LIVE = '__direct__';
 const FACE_GROUPS = [
   ['Yeux', n => n.startsWith('eye')], ['Sourcils, joues, nez', n => /^(brow|cheek|nose)/.test(n)],
   ['Mâchoire', n => n.startsWith('jaw')], ['Bouche', n => n.startsWith('mouth') || n === 'tongueOut']];
@@ -783,59 +792,118 @@ function faceStatus(f) {
 }
 function renderFace() {
   const L = S.faces || [];
-  if (!faceSel || !L.some(f => f.name === faceSel)) faceSel = L.length ? L[0].name : null;
+  if (!faceCam || !S.cams.some(c => c.id === faceCam)) faceCam = S.cams.length ? S.cams[0].id : null;
+  if (faceSel === LIVE && !faceCam) faceSel = null;
+  if (!faceSel || (faceSel !== LIVE && !L.some(f => f.name === faceSel))) faceSel = faceCam ? LIVE : L.length ? L[0].name : null;
   // nouvelle capture
   const tk = S.take && S.take.kind === 'visage' ? S.take : null;
   const rec = tk && ['starting', 'recording'].includes(tk.state), stopping = tk && tk.state === 'stopping';
-  if (!faceCam || !S.cams.some(c => c.id === faceCam)) faceCam = S.cams.length ? S.cams[0].id : null;
   const cam = S.cams.find(c => c.id === faceCam);
   const front = cam && cam.facing === 'front';
-  const key = JSON.stringify([S.cams.map(c => [c.id, c.name, c.facing, !!c.preview_ts]), faceCam, tk && tk.state, tk && tk.name]);
+  const key = JSON.stringify([S.cams.map(c => [c.id, c.name, c.facing, !!c.preview_ts]), faceCam, tk && tk.state, tk && tk.name, faceSel === LIVE]);
   if (key !== faceKey) {
     faceKey = key;
     $('faceNew').innerHTML = `
       <h2>Nouvelle capture du visage</h2>
       ${S.cams.length ? `
-        <div class="row2"><select class="input" style="flex:1" onchange="faceCam=this.value; faceKey=''; renderFace()" ${rec || stopping ? 'disabled' : ''}>
+        <div class="row2"><select class="input" style="flex:1" onchange="faceCam=this.value; faceKey=''; faceDetailKey=''; renderFace()" ${rec || stopping ? 'disabled' : ''}>
           ${S.cams.map(c => `<option value="${esc(c.id)}" ${c.id === faceCam ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
           <span class="seg"><button aria-pressed="${!!front}" onclick="send({a:'face_facing',cam:'${esc(faceCam)}',facing:'front'})" ${rec ? 'disabled' : ''}>Avant</button><button aria-pressed="${!front}" onclick="send({a:'face_facing',cam:'${esc(faceCam)}',facing:'back'})" ${rec ? 'disabled' : ''}>Arrière</button></span></div>
-        <div class="prev">${cam && cam.preview_ts ? `<img data-prev="${esc(cam.id)}" src="/preview/${esc(cam.id)}?t=${cam.preview_ts}" alt="">` : 'En attente de l\'image…'}</div>
-        <p class="hint" style="margin:0">Visage de face, à 40–70 cm, bien éclairé de face, sans contre-jour. ${front ? '' : 'Caméra avant : vous vous voyez pendant la prise.'}</p>
+        ${faceSel === LIVE ? '' : `<div class="prev" role="button" tabindex="0" onclick="selectFace(LIVE)">${cam && cam.preview_ts ? `<img data-prev="${esc(cam.id)}" src="/preview/${esc(cam.id)}?t=${cam.preview_ts}" alt="">` : 'En attente de l\'image…'}<span class="open">Aperçu en direct</span></div>`}
+        <p class="hint" style="margin:0">Visage de face, à 40–70 cm, bien éclairé de face, sans contre-jour. Tenez le téléphone à la verticale : la vidéo et le visage 3D le seront aussi.</p>
         ${rec ? `<button class="recbtn stop" onclick="send({a:'stop'})">Arrêter</button>` :
           `<button class="recbtn" ${stopping ? 'disabled' : ''} onclick="send({a:'face_record',cam:'${esc(faceCam)}'})">${stopping ? 'Envoi de la vidéo…' : 'Enregistrer le visage'}</button>`}`
       : '<p class="hint" style="margin:0">Connectez un téléphone (onglet Tournage) pour filmer, ou importez une vidéo.</p>'}
       <button class="btn" onclick="$('faceFile').click()">Importer une vidéo…</button>`;
   }
-  $('facesList').innerHTML = L.length ? L.map(f => `<div class="tk" role="button" tabindex="0" aria-selected="${f.name === faceSel}" onclick="selectFace('${esc(f.name)}')">
+  $('facesList').innerHTML = (faceCam ? `<div class="tk live" role="button" tabindex="0" aria-selected="${faceSel === LIVE}" onclick="selectFace(LIVE)">
+      <span class="n">Aperçu en direct</span><span class="st"><span class="hint">${esc(cam ? cam.name : '')}</span></span>
+      <span class="s">Le visage suivi en temps réel, avant d'enregistrer</span></div>` : '') +
+    (L.length ? L.map(f => `<div class="tk" role="button" tabindex="0" aria-selected="${f.name === faceSel}" onclick="selectFace('${esc(f.name)}')">
       <span class="n">${esc(f.name)}</span><span class="st">${faceStatus(f)}</span>
       <span class="s">${f.created ? esc(f.created.slice(0, 16).replace(' ', ', ')) : ''}${f.duration ? ', ' + fr(f.duration) + ' s' : ''}</span>
       <span class="s" style="justify-self:end">${esc(f.camera || '')}</span></div>`).join('')
-    : '<div class="empty-page">Aucune capture du visage pour l\'instant.</div>';
+    : '<div class="empty-page">Aucune capture du visage pour l\'instant.</div>');
   renderFaceDetail();
+  faceLiveSync();
 }
-function selectFace(n) { faceSel = n; renderFace(); }
+function selectFace(n) { faceSel = n; faceKey = ''; renderFace(); }
 window.selectFace = selectFace;
 let faceDetailKey = '';
+function renderFaceLive(box) {
+  const cam = S.cams.find(c => c.id === faceCam);
+  const tk = S.take && S.take.kind === 'visage' ? S.take : null;
+  const rec = tk && ['starting', 'recording', 'stopping'].includes(tk.state);
+  const key = JSON.stringify([LIVE, faceCam, cam && cam.name, !!(cam && cam.preview_ts), rec]);
+  if (key === faceDetailKey && document.getElementById('faceLiveView')) return;
+  faceDetailKey = key;
+  box.innerHTML = `
+    <div class="take-head"><div><h1>Aperçu en direct</h1>
+      <div class="sub">${esc(cam ? cam.name : '')} — le visage est suivi en temps réel, tête fixe, comme dans le FBX</div></div></div>
+    <div class="panel">
+      <div class="face-view" id="faceLiveView">
+        <div class="cam">${cam && cam.preview_ts ? `<img id="faceLiveImg" data-prev="${esc(cam.id)}" src="/preview/${esc(cam.id)}?t=${cam.preview_ts}" alt="Image de ${esc(cam.name)}">` : 'En attente de l\'image…'}</div>
+        <div class="viewer" id="faceLiveBox"><div class="empty" id="faceLiveEmpty">${rec ? 'Enregistrement en cours : l\'aperçu reprend à la fin.' : 'Recherche du visage…'}</div></div>
+      </div>
+      <div class="headvals" id="faceLiveState"></div>
+      <div class="bars" id="faceBars"></div>
+    </div>`;
+  const img = document.getElementById('faceLiveImg');
+  if (img) img.onload = () => faceAspect(img.naturalWidth, img.naturalHeight, 'faceLiveView');
+  liveBarsReady = false;
+}
+let liveBarsReady = false, liveOn = null;
+function faceAspect(w, h, id) {
+  const el = document.getElementById(id);
+  if (el && w && h) el.style.setProperty('--ar', `${w} / ${h}`);
+}
+function faceLiveSync() {
+  const want = $('pFace').classList.contains('on') && faceSel === LIVE && faceCam ? faceCam : null;
+  if (want === liveOn) return;
+  liveOn = want;
+  send({ a: 'face_live', cam: want || '', on: !!want });
+}
+window.addEventListener('beforeunload', () => { if (liveOn) send({ a: 'face_live', on: false }); });
+function faceLiveData(m) {
+  if (faceSel !== LIVE || m.cam !== faceCam) return;
+  const st = $('faceLiveState');
+  if (m.error) { if (st) st.textContent = 'Suivi indisponible : ' + m.error; return; }
+  if (!m.found) { if (st) st.textContent = 'Aucun visage dans l\'image : cadrez le visage de face, bien éclairé.'; return; }
+  if (st) st.textContent = '';
+  const el = $('faceBars');
+  if (el && !liveBarsReady) {
+    liveBarsReady = true;
+    el.innerHTML = FACE_GROUPS.map(([g, test]) => `<h4>${g}</h4>` + ARKIT_NAMES.map((n, i) => test(n) ? `<div class="bar" title="${n}"><span>${n}</span><i><b data-i="${i}"></b></i></div>` : '').join('')).join('');
+  }
+  document.querySelectorAll('#faceBars b[data-i]').forEach(b => { b.style.width = (100 * m.w[+b.dataset.i]).toFixed(1) + '%'; });
+  if (window.mcFace) window.mcFace.live(m.v);
+}
+const ARKIT_NAMES = ['eyeBlinkLeft', 'eyeLookDownLeft', 'eyeLookInLeft', 'eyeLookOutLeft', 'eyeLookUpLeft', 'eyeSquintLeft', 'eyeWideLeft',
+  'eyeBlinkRight', 'eyeLookDownRight', 'eyeLookInRight', 'eyeLookOutRight', 'eyeLookUpRight', 'eyeSquintRight', 'eyeWideRight',
+  'jawForward', 'jawLeft', 'jawRight', 'jawOpen', 'mouthClose', 'mouthFunnel', 'mouthPucker', 'mouthLeft', 'mouthRight',
+  'mouthSmileLeft', 'mouthSmileRight', 'mouthFrownLeft', 'mouthFrownRight', 'mouthDimpleLeft', 'mouthDimpleRight',
+  'mouthStretchLeft', 'mouthStretchRight', 'mouthRollLower', 'mouthRollUpper', 'mouthShrugLower', 'mouthShrugUpper',
+  'mouthPressLeft', 'mouthPressRight', 'mouthLowerDownLeft', 'mouthLowerDownRight', 'mouthUpperUpLeft', 'mouthUpperUpRight',
+  'browDownLeft', 'browDownRight', 'browInnerUp', 'browOuterUpLeft', 'browOuterUpRight', 'cheekPuff', 'cheekSquintLeft',
+  'cheekSquintRight', 'noseSneerLeft', 'noseSneerRight', 'tongueOut'];
 function renderFaceDetail(force) {
   const box = $('faceDetail');
+  if (faceSel === LIVE) { renderFaceLive(box); return; }
   const f = (S.faces || []).find(x => x.name === faceSel);
   const P = S.processing;
   const running = P && P.running && f && P.take === f.name;
   const queued = f && S.queue.some(j => j.take === f.name);
-  const chars = S.characters.filter(c => !c.info || c.info.arkit === undefined || c.info.arkit > 0);
-  const key = JSON.stringify([f, running && P.step, queued, chars.map(c => c.id), S.face_character]);
+  const key = JSON.stringify([f, running && P.step, queued]);
   if (!force && key === faceDetailKey) return;
   faceDetailKey = key;
   if (!f) { box.innerHTML = '<div class="empty-page">Filmez ou importez une vidéo de visage : une seule caméra suffit.</div>'; return; }
   const oldView = document.getElementById('faceView');
-  const keepView = oldView && oldView.dataset.face === f.name && oldView.dataset.glb === String(f.glb) && oldView.dataset.c === (window.faceSrc || '');
+  const keepView = oldView && oldView.dataset.face === f.name && oldView.dataset.glb === String(f.glb);
   const steps = running && P.kind === 'visage' ? `<div class="steps">${FACE_STEPS.map((t, i) => `<div class="step ${i + 1 < P.step ? 'done' : i + 1 === P.step ? 'cur' : ''}"><span class="n">${i + 1}</span><span>${t}</span></div>`).join('')}</div>` : '';
-  const animated = chars.filter(c => f.characters.includes(c.id));
-  if (window.faceSrc && !animated.some(c => c.id === window.faceSrc)) window.faceSrc = '';
   box.innerHTML = `
     <div class="take-head">
       <div><h1>${esc(f.name)}</h1>
-        <div class="sub">${f.created ? esc(f.created) : ''}${f.duration ? ' — ' + fr(f.duration) + ' s' : ''}${f.frames ? ` — ${f.frames} images à ${fr(f.fps, 0)} i/s` : ''} — ${esc(f.video || 'pas de vidéo')}</div></div>
+        <div class="sub">${[f.created && esc(f.created), f.duration && fr(f.duration) + ' s', f.frames && `${f.frames} images à ${fr(f.fps, 0)} i/s`, esc(f.video || 'pas de vidéo')].filter(Boolean).join(' — ')}</div></div>
       <button class="btn small danger icon-btn" ${running ? 'disabled' : ''} onclick="if(confirm('Supprimer ${esc(f.name)} ?\\n\\nSon dossier part à la corbeille de Windows.')) send({a:'face_delete',name:'${esc(f.name)}'})">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg>
         Supprimer</button>
@@ -843,14 +911,12 @@ function renderFaceDetail(force) {
     <div class="grid2">
       <div class="panel">
         <div id="faceViewSlot"></div>
-        ${animated.length ? `<div class="row" style="align-items:center"><span class="hint">Afficher</span><span class="seg"><button aria-pressed="${!window.faceSrc}" onclick="window.faceSrc=''; renderFaceDetail(true)">Visage MOCAM</button>${animated.map(c => `<button aria-pressed="${window.faceSrc === c.id}" onclick="window.faceSrc='${esc(c.id)}'; renderFaceDetail(true)">${esc(c.name)}</button>`).join('')}</span></div>` : ''}
-        <div class="headvals" id="faceHead"></div>
         <div class="bars" id="faceBars">${f.processed ? '' : '<p class="hint">Les 52 blendshapes s\'affichent ici une fois la vidéo traitée.</p>'}</div>
       </div>
-      <div style="display:grid; gap:18px">
+      <div style="display:grid; gap:18px; align-content:start">
         <div class="panel">
           <div class="side-h">Traitement</div>
-          ${running ? `<div class="hint">En cours${P.step ? ` : étape ${P.step} sur 4` : '…'}</div>${steps}` :
+          ${running ? `<div class="hint">En cours${P.step ? ` : étape ${P.step} sur ${FACE_STEPS.length}` : '…'}</div>${steps}` :
             queued ? '<div class="hint">En attente de son tour.</div>' :
             `<div class="${f.processed ? 'ok-t' : 'hint'}">${f.processed ? 'Visage traité : 52 blendshapes ARKit' : 'Moins d\'une minute pour 20 s de vidéo.'}</div>
              <div><button class="btn ${f.processed ? '' : 'primary'}" onclick="send({a:'face_process',name:'${esc(f.name)}'})" ${f.video ? '' : 'disabled'}>${f.processed ? 'Retraiter' : 'Traiter la vidéo'}</button></div>`}
@@ -859,22 +925,12 @@ function renderFaceDetail(force) {
           <div class="side-h">Réglages</div>
           <div class="row" style="align-items:center"><span class="hint" style="min-width:90px">Lissage</span><span class="seg">${['faible', 'moyen', 'fort'].map(l => `<button aria-pressed="${f.lissage === l}" onclick="faceSet('${esc(f.name)}', {lissage:'${l}'})">${l[0].toUpperCase() + l.slice(1)}</button>`).join('')}</span></div>
           <div class="row" style="align-items:center"><span class="hint" style="min-width:90px">Intensité</span><input type="range" min="50" max="150" step="5" value="${f.intensite}" style="flex:1; accent-color: var(--act)" oninput="this.nextElementSibling.textContent=this.value+' %'" onchange="faceSet('${esc(f.name)}', {intensite:+this.value})"><span class="hint" style="min-width:48px">${f.intensite} %</span></div>
-          <label class="row" style="align-items:center; gap:8px"><input type="checkbox" ${f.miroir ? 'checked' : ''} onchange="faceSet('${esc(f.name)}', {miroir:this.checked})"> Vidéo en miroir (inverse gauche et droite)</label>
-          <label class="row" style="align-items:center; gap:8px"><input type="checkbox" ${f.tete ? 'checked' : ''} onchange="faceSet('${esc(f.name)}', {tete:this.checked})"> Rotation de la tête (sinon la tête reste fixe)</label>
           <p class="hint" style="margin:0">Faible : plus de détails, un peu plus de bruit. Fort : très doux. Un changement refait les courbes en quelques secondes, sans refaire le suivi.</p>
         </div>
         <div class="panel">
           <div class="side-h">Fichiers</div>
-          ${f.fbx ? `<div class="file"><span class="ext">FBX</span><span>${esc(f.name)}.fbx — visage MOCAM, 52 blendshapes ARKit + tête</span></div>` : ''}
-          ${f.csv ? `<div class="file"><span class="ext">CSV</span><span>${esc(f.name)}.csv — courbes au format Live Link Face</span></div>` : ''}
-          ${f.characters.map(c => `<div class="file"><span class="ext">FBX</span><span>${esc(f.name)}_${esc(c)}.fbx — ${esc((S.characters.find(x => x.id === c) || {}).name || c)} animé</span></div>`).join('')}
-          ${!f.fbx && !f.csv ? '<div class="hint">Les fichiers sont créés à la fin du traitement.</div>' : ''}
+          ${f.fbx ? `<div class="file"><span class="ext">FBX</span><span>${esc(f.name)}.fbx — visage MOCAM, 52 blendshapes ARKit, tête fixe</span></div>` : '<div class="hint">Le FBX est créé à la fin du traitement.</div>'}
           <div><button class="btn" onclick="send({a:'face_open',name:'${esc(f.name)}'})">Ouvrir le dossier</button></div>
-          <div class="side-h" style="margin-top:6px">Personnage à blendshapes</div>
-          ${chars.length ? `<div class="row"><select class="input" id="faceChar" style="flex:1">${chars.map(c => `<option value="${esc(c.id)}" ${c.id === S.face_character ? 'selected' : ''}>${esc(c.name)}${c.info && c.info.arkit ? ` (${c.info.arkit} blendshapes)` : ''}</option>`).join('')}</select>
-             <button class="btn" ${f.processed && !running ? '' : 'disabled'} onclick="send({a:'face_animate',name:'${esc(f.name)}',id:$('faceChar').value})">Animer</button></div>
-             <label class="row" style="align-items:center; gap:8px"><input type="checkbox" ${S.face_character ? 'checked' : ''} onchange="send({a:'face_character_default', id: this.checked ? $('faceChar').value : ''})"> Animer ce personnage après chaque capture</label>`
-            : '<div class="hint">Importez dans l\'onglet Personnages un modèle dont les blendshapes portent les noms ARKit (eyeBlinkLeft, jawOpen…) : ses blendshapes seront animées.</div>'}
         </div>
       </div>
     </div>
@@ -882,15 +938,17 @@ function renderFaceDetail(force) {
   const slot = $('faceViewSlot');
   if (keepView) slot.replaceWith(oldView);
   else {
-    slot.outerHTML = `<div class="face-view" id="faceView" data-face="${esc(f.name)}" data-glb="${f.glb}" data-c="${esc(window.faceSrc || '')}">
+    slot.outerHTML = `<div class="face-view" id="faceView" data-face="${esc(f.name)}" data-glb="${f.glb}">
       ${f.video ? `<video id="faceVideo" src="/visage/${encodeURIComponent(f.name)}/video" controls playsinline muted loop preload="auto"></video>` : '<div class="viewer"><div class="empty">Pas de vidéo</div></div>'}
-      <div class="viewer" id="faceBox"><div class="empty" id="faceEmpty">${f.glb || window.faceSrc ? 'Chargement du visage…' : 'Le visage 3D apparaît une fois la vidéo traitée.'}</div></div></div>`;
+      <div class="viewer" id="faceBox"><div class="empty" id="faceEmpty">${f.glb ? 'Chargement du visage…' : 'Le visage 3D apparaît une fois la vidéo traitée.'}</div></div></div>`;
+    const v = document.getElementById('faceVideo');
+    if (v) v.addEventListener('loadedmetadata', () => faceAspect(v.videoWidth, v.videoHeight, 'faceView'));
     faceCurves = null;
     if (f.processed) loadFaceCurves(f.name);
   }
   if (!faceCurves && f.processed && !keepView) loadFaceCurves(f.name);
   else if (faceCurves && keepView) loadFaceBars();
-  if ((f.glb || window.faceSrc) && window.mcFace) window.mcFace.show(f.name, window.faceSrc || '');
+  if (f.glb && window.mcFace) window.mcFace.show(f.name);
   if (P && P.take === f.name && $('faceLog')) $('faceLog').textContent = logText;
 }
 window.renderFaceDetail = renderFaceDetail;
@@ -918,10 +976,6 @@ async function loadFaceCurves(name) {
   const i = Math.max(0, Math.min(faceCurves.frames - 1, Math.round(v.currentTime * faceCurves.fps)));
   const w = faceCurves.weights[i];
   document.querySelectorAll('#faceBars b[data-i]').forEach(b => { b.style.width = (100 * w[+b.dataset.i]).toFixed(1) + '%'; });
-  const h = faceCurves.head[i];
-  const hv = $('faceHead');
-  if (hv && faceCurves.tete === false) hv.innerHTML = 'Tête fixe : seules les expressions bougent (rotation de la tête désactivée dans les réglages)';
-  else if (hv && h) hv.innerHTML = `Tête : lacet <b>${h[0].toFixed(0)}°</b> tangage <b>${h[1].toFixed(0)}°</b> roulis <b>${h[2].toFixed(0)}°</b>`;
 })();
 async function uploadFace(file) {
   if (!file) return;
@@ -1109,10 +1163,10 @@ function faceResize() {
   if (w && h) { F.r.setSize(w, h, false); F.cam.aspect = w / h; F.cam.updateProjectionMatrix(); }
 }
 window.mcFace = {
-  async show(name, cid) {
+  async show(name) {
     const box = document.getElementById('faceBox');
     if (!box) return;
-    const key = `${name}|${cid}`;
+    const key = name;
     if (F.box !== box) {
       cancelAnimationFrame(F.raf);
       if (F.r) { F.r.dispose(); F.r.domElement.remove(); }
@@ -1137,7 +1191,7 @@ window.mcFace = {
     F.key = key;
     const empty = document.getElementById('faceEmpty');
     try {
-      const url = `/visage/${encodeURIComponent(name)}/apercu.glb?${cid ? 'c=' + encodeURIComponent(cid) + '&' : ''}t=${Date.now()}`;
+      const url = `/visage/${encodeURIComponent(name)}/apercu.glb?t=${Date.now()}`;
       const g = await new GLTFLoader().loadAsync(url);
       if (F.key !== key) return;
       for (const o of [...F.scene.children]) if (o.userData.content) F.scene.remove(o);
@@ -1162,7 +1216,50 @@ window.mcFace = {
       if (empty) empty.remove();
     } catch (e) { if (empty) empty.textContent = 'Visage 3D indisponible : ' + e.message; }
   },
+  // aperçu direct : maillage du visage suivi (468 points, tête fixe) mis à jour à chaque image
+  async live(v) {
+    const box = document.getElementById('faceLiveBox');
+    if (!box || !v) return;
+    if (Lv.box !== box) {
+      if (Lv.r) { Lv.r.dispose(); Lv.r.domElement.remove(); }
+      Lv.box = box; Lv.geo = null;
+      Lv.r = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      Lv.r.setPixelRatio(Math.min(2, devicePixelRatio));
+      Lv.r.outputColorSpace = THREE.SRGBColorSpace;
+      box.appendChild(Lv.r.domElement);
+      Lv.scene = new THREE.Scene();
+      Lv.cam = new THREE.PerspectiveCamera(30, 0.75, 0.01, 10);
+      Lv.cam.position.set(0, 0.01, 0.5);
+      Lv.ctl = new OrbitControls(Lv.cam, Lv.r.domElement);
+      Lv.ctl.target.set(0, 0.01, -0.04); Lv.ctl.enableDamping = true;
+      Lv.scene.add(new THREE.HemisphereLight(0xfff4ec, 0x30333a, 2.0));
+      const k = new THREE.DirectionalLight(0xffffff, 2.4); k.position.set(1, 1.5, 2); Lv.scene.add(k);
+      const rim = new THREE.DirectionalLight(0x9fb8ff, 1.2); rim.position.set(-2, 1, -1); Lv.scene.add(rim);
+      const fit = () => { const w = box.clientWidth, h = box.clientHeight; if (w && h) { Lv.r.setSize(w, h, false); Lv.cam.aspect = w / h; Lv.cam.updateProjectionMatrix(); } };
+      new ResizeObserver(fit).observe(box); fit();
+      const loop = () => { if (!Lv.r || Lv.box !== box) return; requestAnimationFrame(loop); if (box.offsetParent === null) return; Lv.ctl.update(); Lv.r.render(Lv.scene, Lv.cam); };
+      loop();
+    }
+    if (!Lv.geo) {
+      if (!Lv.tris) {
+        if (Lv.loading) return;
+        Lv.loading = true;
+        try { Lv.tris = (await (await fetch('/visage-maillage.json')).json()).triangles; } finally { Lv.loading = false; }
+      }
+      Lv.geo = new THREE.BufferGeometry();
+      Lv.geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(v.length), 3));
+      Lv.geo.setIndex(Lv.tris.flat());
+      const mesh = new THREE.Mesh(Lv.geo, new THREE.MeshStandardMaterial({ color: 0xd9b8a3, roughness: 0.6, side: THREE.DoubleSide }));
+      mesh.frustumCulled = false;
+      Lv.scene.add(mesh);
+      const e = document.getElementById('faceLiveEmpty'); if (e) e.remove();
+    }
+    Lv.geo.attributes.position.array.set(v);
+    Lv.geo.attributes.position.needsUpdate = true;
+    Lv.geo.computeVertexNormals();
+  },
 };
+const Lv = { r: null, box: null, geo: null, tris: null };
 if (window.mcRerender) window.mcRerender();
 
 // vignettes des personnages : rendu unique hors écran

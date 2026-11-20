@@ -253,15 +253,24 @@ ajoutée.
 ## 5. Capture du visage
 
 L'onglet **Visage** enregistre les expressions du visage avec **une seule caméra** et les
-exporte en **52 blendshapes ARKit** (le standard d'Apple, reconnu par Unreal, Unity, Blender,
-Character Creator, MetaHuman…), plus la rotation de la tête.
+exporte en FBX avec **52 blendshapes ARKit** (le standard d'Apple, reconnu par Unreal, Unity,
+Blender, Character Creator, MetaHuman…). La tête reste fixe : seules les expressions bougent.
 
 ![Onglet Visage : visage 3D et les 52 blendshapes](docs/tuto/11_visage.png)
 
-**Filmer** : dans *Nouvelle capture du visage*, choisissez le téléphone, cliquez **Avant** pour
-passer sur sa caméra avant (vous vous voyez pendant la prise), puis **Enregistrer le visage**
-et **Arrêter**. Ou cliquez **Importer une vidéo…** (ou glissez-la sur l'onglet) : n'importe
-quelle vidéo de visage, filmée avec l'appareil photo du téléphone par exemple.
+**Aperçu en direct** : sélectionnez *Aperçu en direct* en haut de la liste (ou cliquez sur
+l'image du téléphone). L'image de la caméra et le visage 3D suivi en temps réel s'affichent
+côte à côte, avec les 52 blendshapes : vérifiez le cadrage et la lumière avant d'enregistrer.
+
+**Filmer depuis le téléphone** : dans l'app MOCAM, touchez **Visage** (en bas) : l'app passe
+sur la caméra avant et un gros bouton **REC** apparaît à droite. Touchez-le pour démarrer,
+touchez-le à nouveau pour arrêter : la vidéo part toute seule vers MOCAM Studio. Tenez le
+téléphone **à la verticale** : la vidéo et le visage 3D sont alors verticaux aussi.
+
+**Filmer depuis le PC** : dans *Nouvelle capture du visage*, choisissez le téléphone, cliquez
+**Avant**, puis **Enregistrer le visage** et **Arrêter**. Ou cliquez **Importer une vidéo…**
+(ou glissez-la sur l'onglet) : n'importe quelle vidéo de visage, filmée avec l'appareil photo
+du téléphone par exemple.
 
 Pour la meilleure qualité :
 * le visage **de face**, à 40–70 cm, et qui remplit bien l'image ;
@@ -273,30 +282,18 @@ Pour la meilleure qualité :
 **Traiter** : c'est automatique dès que la vidéo arrive (moins d'une minute pour 20 s de vidéo).
 MOCAM suit 478 points du visage image par image, mesure les paupières pour des clignements
 nets, ramène chaque expression au repos à 0, puis lisse les courbes sans retard (les sourcils
-plus fort, les paupières et la mâchoire moins, pour garder les mouvements rapides).
+plus fort, les paupières et la mâchoire moins, pour garder les mouvements rapides). Les
+paupières du visage MOCAM se ferment proprement l'une sur l'autre, sans pli.
 
 **Vérifier** : la vidéo et le visage 3D sont synchronisés, les barres montrent chaque
 blendshape à l'instant affiché. Les **Réglages** s'appliquent en quelques secondes sans
 refaire le suivi :
 * *Lissage* : faible (plus de détails), moyen, fort (très doux) ;
-* *Intensité* : de 50 à 150 %, pour adoucir ou accentuer toutes les expressions ;
-* *Vidéo en miroir* : à cocher si la vidéo est inversée comme dans un miroir (gauche et
-  droite échangées).
+* *Intensité* : de 50 à 150 %, pour adoucir ou accentuer toutes les expressions.
 
-**Les fichiers** (dans `visages\visage_XXX\`) :
-
-| Fichier | Contenu |
-|---|---|
-| `visage_XXX.fbx` | un visage animé avec ses 52 blendshapes ARKit et un os de tête |
-| `visage_XXX.csv` | les courbes au format **Live Link Face** (Epic Games) : import direct dans Unreal ou les add-ons Blender qui lisent ce format |
-| `visage_XXX_<personnage>.fbx` | votre personnage, ses blendshapes animées |
-
-**Sur votre personnage** : importez-le dans l'onglet *Personnages* ; il doit avoir des
-blendshapes aux noms ARKit (`eyeBlinkLeft`, `jawOpen`… ; les variantes `EyeBlink_L` ou
-`A25_Jaw_Open` de Character Creator sont reconnues). Une tête seule, sans squelette, est
-acceptée. Dans l'onglet *Visage*, choisissez-le dans *Personnage à blendshapes* et cliquez
-**Animer**, ou cochez *Animer ce personnage après chaque capture*. Si son squelette a un os de
-tête, il tourne aussi.
+**Le fichier** : `visages\visage_XXX\visage_XXX.fbx`, un visage animé avec ses 52 blendshapes
+ARKit. Sur votre propre personnage, reliez ses blendshapes aux mêmes noms ARKit
+(`eyeBlinkLeft`, `jawOpen`…) dans votre logiciel 3D.
 
 ## 6. Utiliser l'animation
 

@@ -46,7 +46,7 @@ import {
   type Settings,
 } from './src/settings'
 
-const APP_VERSION = '1.3.0'
+const APP_VERSION = '1.4.0'
 
 // Erreurs hors affichage (minuteries, callbacks natifs) : on les montre à l'écran
 // au lieu de laisser l'app se fermer.
@@ -305,6 +305,9 @@ function CaptureScreen({
   const [fov, setFov] = useState(1)
   // caméra avant : capture faciale (onglet Visage de MOCAM Studio)
   const [facing, setFacing] = useState<'back' | 'front'>('back')
+  // mode Visage (caméra avant) : la vidéo suit le téléphone (verticale s'il est vertical)
+  const faceMode = facing === 'front'
+  const [uiRot, setUiRot] = useState(0)
   const lensSetup = useMemo(() => {
     if (facing === 'front') {
       const front = allDevices.find((d) => d.position === 'front' && !d.isVirtualDevice) ??
@@ -870,7 +873,9 @@ function CaptureScreen({
           zoom={lensSetup.zoom}
           resizeMode="contain"
           enableDistortionCorrection={device.supportsDistortionCorrection ? true : undefined}
-          orientationSource="interface"
+          orientationSource={faceMode ? 'device' : 'interface'}
+          onUIRotationChanged={setUiRot}
+          mirrorMode="off"
           onSessionConfigSelected={onConfig}
           onError={(e) => flash(`Caméra : ${e.message}`)}
         />
@@ -926,6 +931,13 @@ function CaptureScreen({
         <View style={{ flex: 1 }} />
         {upload ? <Text style={styles.small}>Envoi {Math.round(upload.pct * 100)} %</Text> : null}
         <Pressable
+          disabled={!!recording}
+          onPress={() => setFacing(faceMode ? 'back' : 'front')}
+          style={[styles.smallBtn, faceMode ? styles.faceOn : null, recording ? { opacity: 0.4 } : null]}
+        >
+          <Text style={styles.smallBtnText}>{faceMode ? 'Visage : oui' : 'Visage'}</Text>
+        </Pressable>
+        <Pressable
           style={styles.smallBtn}
           onPress={() => {
             void stop()
@@ -936,6 +948,22 @@ function CaptureScreen({
         </Pressable>
       </View>
 
+      {faceMode ? (
+        <View style={styles.faceRecWrap} pointerEvents="box-none">
+          <Pressable
+            accessibilityLabel={recording ? "Arrêter l'enregistrement du visage" : 'Enregistrer le visage'}
+            disabled={conn.state !== 'connected' || (!recording && !!upload)}
+            onPress={() => clientRef.current?.send({ t: 'face_record' })}
+            style={[styles.faceRec, conn.state !== 'connected' ? { opacity: 0.4 } : null,
+              { transform: [{ rotate: `${uiRot}deg` }] }]}
+          >
+            <View style={recording ? styles.faceRecStop : styles.faceRecDot} />
+          </Pressable>
+          <Text style={[styles.small, { transform: [{ rotate: `${uiRot}deg` }] }]}>
+            {conn.state !== 'connected' ? 'Non connecté' : recording ? 'Arrêter' : upload ? 'Envoi…' : 'REC visage'}
+          </Text>
+        </View>
+      ) : null}
       {banner ? (
         <View style={styles.banner}>
           <Text style={styles.text}>{banner}</Text>
@@ -1069,6 +1097,14 @@ const styles = StyleSheet.create({
   camName: { color: '#fff', fontSize: 20, fontWeight: '700' },
   rec: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   recDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#ff3b30' },
+  faceOn: { borderColor: '#3ddc84', backgroundColor: '#3ddc8433' },
+  faceRecWrap: { position: 'absolute', right: 24, top: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', gap: 8 },
+  faceRec: {
+    width: 76, height: 76, borderRadius: 38, borderWidth: 4, borderColor: '#fff',
+    alignItems: 'center', justifyContent: 'center', backgroundColor: '#0006',
+  },
+  faceRecDot: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#ff3b30' },
+  faceRecStop: { width: 30, height: 30, borderRadius: 6, backgroundColor: '#ff3b30' },
   recText: { color: '#ff3b30', fontSize: 18, fontWeight: '700' },
   smallBtn: { borderWidth: 1, borderColor: '#aaa', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4 },
   smallBtnText: { color: '#fff', fontSize: 13 },
