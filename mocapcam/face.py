@@ -353,6 +353,7 @@ def learn_face(raw, weights, miroir=False):
     X = Wt
     lam = 1e-2 * max(1e-6, float(np.mean(np.diag(X.T @ X)))) + 1e-4 * len(X)
     delta = np.linalg.solve(X.T @ X + lam * np.eye(X.shape[1]), X.T @ D).reshape(len(ARKIT), 468, 3)
+    delta = localize(delta, neutral, miroir)
     # repère Blender (le sujet regarde vers -Y) : x image -> +X (gauche du sujet), haut -> +Z,
     # vers la caméra -> -Y ; vidéo en miroir : x inversé
     def to_b(v):
@@ -361,6 +362,80 @@ def learn_face(raw, weights, miroir=False):
     nb = to_b(neutral)
     nb[:, 2] -= nb[:, 2].min()                             # menton à z = 0 (posé sur l'os de la tête)
     return nb, to_b(delta), _triangles()
+
+
+def _region_pts():
+    from mediapipe.tasks.python.vision.face_landmarker import FaceLandmarksConnections as C
+    pts = lambda conns: sorted({p for c in conns for p in (c.start, c.end)})
+    return dict(eyeL=pts(C.FACE_LANDMARKS_LEFT_EYE), eyeR=pts(C.FACE_LANDMARKS_RIGHT_EYE),
+                browL=pts(C.FACE_LANDMARKS_LEFT_EYEBROW), browR=pts(C.FACE_LANDMARKS_RIGHT_EYEBROW),
+                lips=pts(C.FACE_LANDMARKS_LIPS), nose=pts(C.FACE_LANDMARKS_NOSE))
+
+
+def _smoothstep(d, r, fall):
+    t = np.clip((d - r) / fall, 0, 1)
+    return 1 - t * t * (3 - 2 * t)
+
+
+def shape_masks(neutral, miroir=False):
+    """Zone d'action de chaque blendshape (0 à 1 par sommet, bords adoucis) : un clignement ne
+    touche que la paupière, un sourire que le bas du visage, etc. neutral : repère « face »."""
+    R = _region_pts()
+    if miroir:      # vidéo en miroir : l'œil gauche du sujet est l'œil « droit » de MediaPipe
+        R["eyeL"], R["eyeR"], R["browL"], R["browR"] = R["eyeR"], R["eyeL"], R["browR"], R["browL"]
+    V = neutral
+    dist = {k: np.min(np.linalg.norm(V[:, None] - V[None, idx], axis=2), axis=1) for k, idx in R.items()}
+    near = lambda k, r, fall=0.02: _smoothstep(dist[k], r, fall)
+    # bas du visage (bouche, mâchoire) : sous la base du nez, fondu de 2 cm au-dessus
+    base = V[2, 1]
+    lower = _smoothstep(V[:, 1] - (base - 0.008), 0.0, 0.02)
+    M = {}
+    for n in ARKIT:
+        side = "L" if n.endswith("Left") else "R" if n.endswith("Right") else None
+        if n.startswith(("eyeBlink", "eyeLook", "eyeSquint", "eyeWide")):
+            m = near("eye" + side, 0.012, 0.015)
+        elif n.startswith("browInnerUp"):
+            m = np.maximum(near("browL", 0.02), near("browR", 0.02)) * _smoothstep(np.abs(V[:, 0]), 0.03, 0.03)
+        elif n.startswith("brow"):
+            m = near("brow" + side, 0.02)
+        elif n.startswith("cheekSquint"):
+            m = near("eye" + side, 0.03) * _smoothstep(V[:, 1] - (V[R["eye" + side], 1].min() + 0.005), 0, 0.01)
+        elif n.startswith("noseSneer"):
+            m = near("nose", 0.015)
+        elif n == "cheekPuff":
+            m = np.maximum(near("lips", 0.04), lower * 0.0)
+        elif n.startswith(("jaw", "mouth")):
+            m = lower
+        else:                                # tongueOut : pas de langue sur ce visage
+            m = np.zeros(len(V))
+        M[n] = m
+    return M
+
+
+def localize(delta, neutral, miroir=False):
+    """Retire de chaque blendshape tout mouvement d'ensemble de la tête (translation, rotation,
+    échelle, appris par erreur quand la tête bouge en même temps qu'une expression), puis la
+    limite à sa zone : le visage reste fixe, seules les parties concernées bougent."""
+    M = shape_masks(neutral, miroir)
+    out = np.zeros_like(delta)
+    P = neutral - neutral.mean(0)
+    for j, n in enumerate(ARKIT):
+        d, m = delta[j], M[n]
+        w = 1.0 - m                                         # points qui ne doivent pas bouger
+        if w.sum() > 10:
+            # d ≈ t + ω × p + s p sur ces points (petits mouvements) : moindres carrés pondérés
+            A = np.zeros((len(P), 3, 7))
+            A[:, :, :3] = np.eye(3)
+            x, y, z = P[:, 0], P[:, 1], P[:, 2]
+            A[:, 0, 3:6] = np.stack([np.zeros_like(x), z, -y], 1)
+            A[:, 1, 3:6] = np.stack([-z, np.zeros_like(x), x], 1)
+            A[:, 2, 3:6] = np.stack([y, -x, np.zeros_like(x)], 1)
+            A[:, :, 6] = P
+            sw = np.sqrt(w)[:, None, None]
+            sol, *_ = np.linalg.lstsq((A * sw).reshape(-1, 7), (d * sw[..., 0]).reshape(-1), rcond=None)
+            d = d - (A @ sol)
+        out[j] = d * m[:, None]
+    return out
 
 
 # ------------------------------------------------------------------------------------- sorties
@@ -434,6 +509,7 @@ def run(face_dir, studio_dir=None, blender=None, log=print, retrack=False, chara
     lissage = meta.get("lissage", "moyen")
     intensite = float(meta.get("intensite", 100)) / 100.0
     miroir = bool(meta.get("miroir", False))
+    tete = bool(meta.get("tete", False))     # rotation de la tête : désactivée = visage fixe
     video = find_video(face_dir)
     if not video:
         raise RuntimeError("pas de vidéo dans ce dossier")
@@ -460,10 +536,13 @@ def run(face_dir, studio_dir=None, blender=None, log=print, retrack=False, chara
     log(f"    visage trouvé sur {found} images sur {n} ({100 * found / max(1, n):.0f} %) à {raw['fps']:.0f} i/s")
     log(f"2/4 calibration et lissage ({lissage}, intensité {intensite * 100:.0f} %)")
     W, head, move, rest = process(raw, lissage, intensite, miroir)
+    if not tete:
+        head = np.zeros_like(head)
+        move = np.zeros_like(move)
     neutral, delta, tris = learn_face(raw, W, miroir)
     data = dict(fps=raw["fps"], frames=n, names=ARKIT, weights=np.round(W, 4).tolist(),
                 head=np.round(head, 3).tolist(), move_cm=np.round(move, 3).tolist(), rest=rest,
-                found=found, lissage=lissage, intensite=round(intensite * 100), miroir=miroir,
+                found=found, lissage=lissage, intensite=round(intensite * 100), miroir=miroir, tete=tete,
                 face=dict(vertices=np.round(neutral, 5).tolist(), triangles=tris,
                           deltas=np.round(delta, 5).tolist()))
     with open(out["json"], "w", encoding="utf-8") as f:

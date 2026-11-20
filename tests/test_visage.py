@@ -66,6 +66,7 @@ def main():
             __import__("shutil").copy(video, fd)
     else:
         Wsrc, names = fake_take(fd)
+        face.write_meta(fd, tete=True)
     import bpy  # noqa: F401  (Blender en module)
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "blender_addon"))
     import mocapcam_blender as mb
@@ -87,6 +88,17 @@ def main():
         j = names.index("jawOpen")
         r = np.corrcoef(Wsrc[:, j], W[:, face.ARKIT.index("jawOpen")])[0, 1]
         ok("lissage sans déformer la courbe", r > 0.97, f"corrélation avec la source {r:.3f}")
+    # visage fixe : chaque blendshape ne bouge que sa zone (le reste du visage est immobile)
+    dl = np.array(d["face"]["deltas"])
+    moved = np.linalg.norm(dl, axis=2) > 1e-5
+    eye = max(moved[face.ARKIT.index(n)].mean() for n in face.ARKIT if n.startswith("eye"))
+    allm = max(moved[j].mean() for j in range(52))
+    ok("blendshapes limitées à leur zone (tête fixe)", eye < 0.3 and not moved[51].any(),
+       f"une forme des yeux bouge au plus {eye * 100:.0f} % des sommets, toute forme au plus {allm * 100:.0f} %")
+    face.write_meta(fd, tete=False)
+    out = face.run(fd, log=lambda *a: None)
+    H0 = np.array(json.load(open(out["json"]))["head"])
+    ok("tête fixe par défaut", np.abs(H0).max() == 0, "rotation désactivée : tête immobile")
     # FBX : 52 blendshapes animées
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.import_scene.fbx(filepath=out["fbx"])

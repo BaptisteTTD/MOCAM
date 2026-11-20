@@ -333,7 +333,7 @@
 <script>
 let ws, S = null, serverDelta = 0, takeTyped = false, selTake = null, logText = '';
 const autoAnimated = new Set();   // prises où le personnage par défaut a été lancé automatiquement
-const UI_VERSION = '1.5.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
+const UI_VERSION = '1.6.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
 function newerVersion(a, b) {
   const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
   for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
@@ -860,6 +860,7 @@ function renderFaceDetail(force) {
           <div class="row" style="align-items:center"><span class="hint" style="min-width:90px">Lissage</span><span class="seg">${['faible', 'moyen', 'fort'].map(l => `<button aria-pressed="${f.lissage === l}" onclick="faceSet('${esc(f.name)}', {lissage:'${l}'})">${l[0].toUpperCase() + l.slice(1)}</button>`).join('')}</span></div>
           <div class="row" style="align-items:center"><span class="hint" style="min-width:90px">Intensité</span><input type="range" min="50" max="150" step="5" value="${f.intensite}" style="flex:1; accent-color: var(--act)" oninput="this.nextElementSibling.textContent=this.value+' %'" onchange="faceSet('${esc(f.name)}', {intensite:+this.value})"><span class="hint" style="min-width:48px">${f.intensite} %</span></div>
           <label class="row" style="align-items:center; gap:8px"><input type="checkbox" ${f.miroir ? 'checked' : ''} onchange="faceSet('${esc(f.name)}', {miroir:this.checked})"> Vidéo en miroir (inverse gauche et droite)</label>
+          <label class="row" style="align-items:center; gap:8px"><input type="checkbox" ${f.tete ? 'checked' : ''} onchange="faceSet('${esc(f.name)}', {tete:this.checked})"> Rotation de la tête (sinon la tête reste fixe)</label>
           <p class="hint" style="margin:0">Faible : plus de détails, un peu plus de bruit. Fort : très doux. Un changement refait les courbes en quelques secondes, sans refaire le suivi.</p>
         </div>
         <div class="panel">
@@ -919,7 +920,8 @@ async function loadFaceCurves(name) {
   document.querySelectorAll('#faceBars b[data-i]').forEach(b => { b.style.width = (100 * w[+b.dataset.i]).toFixed(1) + '%'; });
   const h = faceCurves.head[i];
   const hv = $('faceHead');
-  if (hv && h) hv.innerHTML = `Tête : lacet <b>${h[0].toFixed(0)}°</b> tangage <b>${h[1].toFixed(0)}°</b> roulis <b>${h[2].toFixed(0)}°</b>`;
+  if (hv && faceCurves.tete === false) hv.innerHTML = 'Tête fixe : seules les expressions bougent (rotation de la tête désactivée dans les réglages)';
+  else if (hv && h) hv.innerHTML = `Tête : lacet <b>${h[0].toFixed(0)}°</b> tangage <b>${h[1].toFixed(0)}°</b> roulis <b>${h[2].toFixed(0)}°</b>`;
 })();
 async function uploadFace(file) {
   if (!file) return;

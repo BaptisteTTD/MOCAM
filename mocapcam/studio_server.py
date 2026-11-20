@@ -35,7 +35,7 @@ from . import fbx, markers as mk, pipeline, sync
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "studio_ui")
 # version du serveur : l'interface (index.html) vérifie qu'elle parle au serveur de la même version
-STUDIO_VERSION = "1.5.0"
+STUDIO_VERSION = "1.6.0"
 
 # horloge du PC en ms (monotone, calée sur l'heure système au démarrage)
 _EPOCH = time.time() * 1000 - time.monotonic() * 1000
@@ -374,7 +374,7 @@ class Studio:
                             csv=os.path.exists(o["csv"]), glb=os.path.exists(o["glb"]),
                             frames=meta.get("frames"), fps=meta.get("fps"), characters=chars,
                             lissage=meta.get("lissage", "moyen"), intensite=meta.get("intensite", 100),
-                            miroir=bool(meta.get("miroir", False))))
+                            miroir=bool(meta.get("miroir", False)), tete=bool(meta.get("tete", False))))
         return out[:80]
 
     def next_face_name(self):
@@ -1158,6 +1158,8 @@ class Studio:
                 kw["intensite"] = int(min(150, max(50, m["intensite"])))
             if isinstance(m.get("miroir"), bool):
                 kw["miroir"] = m["miroir"]
+            if isinstance(m.get("tete"), bool):
+                kw["tete"] = m["tete"]
             facemod.write_meta(d, **kw)
             if m.get("apply"):
                 await self.enqueue_face("visage", name)
