@@ -1,7 +1,7 @@
 bl_info = {
     "name": "MOCAM",
     "author": "MOCAM",
-    "version": (0, 5, 0),
+    "version": (0, 6, 0),
     "blender": (3, 6, 0),
     "location": "Vue 3D > barre latérale (N) > MOCAM  |  Fichier > Importer > Animation MOCAM (.fbx)",
     "description": "Importe une animation MOCAM (FBX, squelette Mixamo) et la transfère (retarget) "
@@ -330,7 +330,10 @@ def bone_map(obj):
     else:
         pre = {}
     cands = {}
+    rigify = "DEF-spine" in names
     for b in bones:
+        if rigify and not b.name.startswith("DEF-"):
+            continue      # Rigify : seuls les os DEF- déforment le maillage (le reste = contrôleurs)
         c = classify_bone(b.name)
         if c is None:
             continue
@@ -456,6 +459,21 @@ def virtual_joints(obj, bmap=None, posed=False):
         h_r, R_r, t_r = rest[bone]
         attach(name, bone, t_r - h_r)
 
+    def tip_of(name, bone, prev, ratio=0.8):
+        """Bout d'un os terminal (dernière phalange…). La queue de l'os n'est fiable que si elle
+        prolonge la chaîne : un FBX (Unreal, Maya…) importé dans Blender a souvent des queues
+        orientées au hasard. Sinon, on prolonge l'os précédent."""
+        h_r, R_r, t_r = rest[bone]
+        d = h_r - rest[prev][0]
+        L = np.linalg.norm(d)
+        tl = t_r - h_r
+        if L < 1e-9:
+            attach(name, bone, tl)
+        elif np.linalg.norm(tl) > 1e-9 and np.dot(nrm(tl), d / L) > 0.95:
+            attach(name, bone, tl)
+        else:
+            attach(name, bone, d * ratio)
+
     attach("nose", "Head", sc * (0.09 * up + 0.10 * fwd))
     for s, sg in (("l", 1), ("r", -1)):
         attach(f"{s}_ear", "Head", sc * (0.07 * up + sg * 0.075 * lat))
@@ -487,8 +505,18 @@ def virtual_joints(obj, bmap=None, posed=False):
         elif f"{side}ToeBase" in rest:
             tip_bone = f"{side}ToeBase"
             tip_off = rest[tip_bone][2] - rest[tip_bone][0]
+            # orteils : vers l'avant, à plat. Queue d'os incohérente (FBX importé) : on prolonge
+            # la direction cheville -> base des orteils, à l'horizontale
+            fw = rest[tip_bone][0] - rest[foot][0]
+            fw = fw - np.dot(fw, up) * up
+            if np.linalg.norm(fw) < 1e-9:
+                fw = fwd * sc * 0.14
+            if np.linalg.norm(tip_off) < 1e-9 or np.dot(nrm(tip_off), nrm(fw)) < 0.7:
+                tip_off = nrm(fw) * max(0.4 * np.linalg.norm(fw), sc * 0.05)
         else:
             tip_bone, tip_off = foot, (rest[foot][2] - rest[foot][0]) + sc * 0.15 * fwd
+            if np.dot(nrm(rest[foot][2] - rest[foot][0]), fwd) < 0.3:
+                tip_off = sc * (0.15 * fwd - 0.06 * up)
         attach(f"{s}_big_toe", tip_bone, tip_off - sc * 0.02 * out)
         attach(f"{s}_small_toe", tip_bone, tip_off + sc * (0.03 * out - 0.03 * fwd))
         attach(f"{s}_heel", foot, sc * (-0.065 * up - 0.05 * fwd))
@@ -505,7 +533,8 @@ def virtual_joints(obj, bmap=None, posed=False):
                 if bn in rest:
                     attach(f"{h}_{base + k}", bn)
                 elif k > 0 and f"{side}Hand{f}{k}" in rest:
-                    tail_of(f"{h}_{base + k}", f"{side}Hand{f}{k}")
+                    pv = f"{side}Hand{f}{k - 1}" if k > 1 and f"{side}Hand{f}{k - 1}" in rest else hb
+                    tip_of(f"{h}_{base + k}", f"{side}Hand{f}{k}", pv)
                 else:
                     # pas d'os de doigt (main « moufle ») : points posés dans le prolongement de la main
                     attach(f"{h}_{base + k}", hb,
@@ -554,8 +583,20 @@ def apply_motion(obj, J_mocap, fps, start_frame=1, root_mode="RELATIVE", action_
     arm = obj.data
     rest_rot = {b.name: np_mat(b.matrix_local.to_3x3().normalized()) for b in arm.bones}
     M = {}
+    P = {}            # position de la tête de chaque os (espace armature), image par image
+    head_l = {b.name: np.array(b.head_local) for b in arm.bones}
+    lpar = dict(mixamo_hierarchy())
+    legu = (np.linalg.norm(head_l[bmap["LeftUpLeg"]] - head_l[bmap["LeftFoot"]])
+            if "LeftFoot" in bmap else 1.0)
     channels = []
     report = {"animated": 0, "static": 0}
+
+    def logical_parent(short):
+        """Os piloté le plus proche au-dessus dans la hiérarchie Mixamo (cuisse -> bassin…)."""
+        k = lpar.get(short)
+        while k is not None and k not in bmap:
+            k = lpar.get(k)
+        return bmap.get(k) if k else None
 
     for b in _ordered_bones(arm):
         short = rev.get(b.name)
@@ -600,10 +641,29 @@ def apply_motion(obj, J_mocap, fps, start_frame=1, root_mode="RELATIVE", action_
         M[b.name] = Mb
         if p is not None:
             B = np.einsum("ij,tjk->tik", Rb.T @ rest_rot[p.name], np.transpose(M[p.name], (0, 2, 1)) @ Mb)
+            fk = P[p.name] + np.einsum("tij,j->ti", M[p.name], rest_rot[p.name].T @ (head_l[b.name] - head_l[p.name]))
         else:
             B = np.einsum("ij,tjk->tik", Rb.T, Mb)
+            fk = np.repeat(head_l[b.name][None], T, 0)
+        P[b.name] = fk
+        # os dont le parent réel n'est pas le parent logique (Rigify : cuisses sous ORG-spine,
+        # bras sous ORG-shoulder, qui ne bougent pas) : on le rattache par une translation
+        loc_keys = None
+        lp = logical_parent(short) if (delta is not None and short not in (None, "Hips")) else None
+        if lp is not None and lp in P and (p is None or lp != p.name):
+            target = P[lp] + np.einsum("tij,j->ti", M[lp], rest_rot[lp].T @ (head_l[b.name] - head_l[lp]))
+            dev = target - fk
+            if np.nanmax(np.linalg.norm(dev, axis=1)) > 1e-3 * legu:
+                Rl = (np.einsum("tij,jk->tik", M[p.name], rest_rot[p.name].T @ Rb) if p is not None
+                      else np.repeat(Rb[None], T, 0))
+                loc_keys = np.einsum("tji,tj->ti", Rl, dev)
+                P[b.name] = target
         if delta is None and p is not None:
             continue  # os non piloté : on laisse sa pose de repos
+        if loc_keys is not None:
+            dp = f'pose.bones["{b.name}"].location'
+            for k in range(3):
+                channels.append((dp, k, loc_keys[:, k], b.name))
         q = mat_to_quat(B)
         q = clean_rotations(q, fps) if clean else continuous_quats(q)
         dp = f'pose.bones["{b.name}"].rotation_quaternion'
@@ -631,6 +691,7 @@ def apply_motion(obj, J_mocap, fps, start_frame=1, root_mode="RELATIVE", action_
                 pos = pos + np.einsum("tij,j->ti", delta, off)
                 inv = np.linalg.inv(mw)
                 pa = (np.c_[pos, np.ones(T)] @ inv.T)[:, :3]   # espace armature
+                P[b.name] = pa.copy()
                 rest4 = np_mat(b.matrix_local)
                 if p is not None:
                     rest4 = np.linalg.inv(np_mat(p.matrix_local)) @ rest4
@@ -642,9 +703,84 @@ def apply_motion(obj, J_mocap, fps, start_frame=1, root_mode="RELATIVE", action_
                     channels.append((dp, k, loc[:, k], b.name))
             report["scale"] = s
 
+    _attach_followers(obj, bmap, specs, M, P, rest_rot, head_l, T, channels, report)
     name = action_name or f"MocapCam_{obj.name}"
     write_action(obj, name, start_frame, channels)
     return report
+
+
+def _weighted_bones(obj):
+    """Os qui déforment réellement un maillage (groupe de sommets non vide)."""
+    out = set()
+    for m in bpy.data.objects:
+        if m.type != "MESH" or not any(md.type == "ARMATURE" and md.object == obj for md in m.modifiers):
+            continue
+        names = {g.index: g.name for g in m.vertex_groups}
+        for v in m.data.vertices:
+            for g in v.groups:
+                if g.weight > 1e-4 and g.group in names:
+                    out.add(names[g.group])
+    return out
+
+
+def _attach_followers(obj, bmap, specs, M, P, rest_rot, head_l, T, channels, report):
+    """Os déformants hors de la chaîne animée (Rigify : DEF-pelvis, DEF-breast sous des os ORG
+    immobiles) : sinon ils restent en pose de repos et étirent le maillage. Chacun suit, de façon
+    rigide, l'os piloté le plus proche (bassin, buste…)."""
+    arm = obj.data
+    driven = {bmap[k] for k in bmap if k in specs and bmap[k] in M}
+    weighted = _weighted_bones(obj)
+
+    def has_driven_ancestor(b):
+        p = b.parent
+        while p is not None:
+            if p.name in driven:
+                return True
+            p = p.parent
+        return False
+
+    segs = []
+    for n in driven:
+        b = arm.bones[n]
+        kids = [c for c in b.children if c.name in driven]
+        t = head_l[kids[0].name] if kids else np.array(b.tail_local)
+        segs.append((n, head_l[n], t))
+    done = set()
+    count = 0
+    for b in _ordered_bones(arm):
+        if b.name in driven or b.name not in weighted or has_driven_ancestor(b):
+            continue
+        if any(a.name in done for a in _ancestors(b)):
+            continue            # suit déjà un os rattaché plus haut
+        h = head_l[b.name]
+
+        def dist(seg):
+            _, a, c = seg
+            ab = c - a
+            u = np.clip(np.dot(h - a, ab) / max(np.dot(ab, ab), 1e-12), 0, 1)
+            return np.linalg.norm(a + u * ab - h)
+        drv = min(segs, key=dist)[0]
+        Rb = rest_rot[b.name]
+        Mb = np.einsum("tij,jk->tik", M[drv], rest_rot[drv].T @ Rb)
+        pos = P[drv] + np.einsum("tij,j->ti", M[drv], rest_rot[drv].T @ (h - head_l[drv]))
+        p = b.parent
+        if p is not None:          # parent immobile (pose de repos) : repère de repos du parent
+            Rp = rest_rot[p.name]
+            Bq = np.einsum("ij,tjk->tik", Rb.T @ Rp, np.einsum("ij,tjk->tik", Rp.T, Mb))
+            loc = np.einsum("ij,tj->ti", Rb.T, pos - head_l[b.name])
+        else:
+            Bq = np.einsum("ij,tjk->tik", Rb.T, Mb)
+            loc = np.einsum("ij,tj->ti", Rb.T, pos - head_l[b.name])
+        q = continuous_quats(mat_to_quat(Bq))
+        obj.pose.bones[b.name].rotation_mode = "QUATERNION"
+        for k in range(4):
+            channels.append((f'pose.bones["{b.name}"].rotation_quaternion', k, q[:, k], b.name))
+        for k in range(3):
+            channels.append((f'pose.bones["{b.name}"].location', k, loc[:, k], b.name))
+        done.add(b.name)
+        count += 1
+    if count:
+        report["followers"] = count
 
 
 def lowpass(x, fps, cutoff):

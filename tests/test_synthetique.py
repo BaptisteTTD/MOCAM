@@ -706,6 +706,143 @@ def test_rigs(path):
        f"FBX animé {n} images, aperçu GLB {os.path.getsize(glb) / 1e3:.0f} ko")
 
 
+def test_imported_rigs(path):
+    """Squelettes importés depuis d'autres logiciels, cas réels difficiles :
+    - Unreal importé : pas d'os de bout (doigts, orteils), queues d'os orientées au hasard ;
+    - Rigify : os DEF- rattachés à des os ORG immobiles (cuisses, bras), contrôleurs aux noms
+      proches (f_index.01_master), os déformants hors de la chaîne (DEF-pelvis)."""
+    import bpy
+    import mathutils
+    import mocapcam_blender as mb
+    src_fbx = os.path.join(OUT, "rigs_source.fbx")
+    if not os.path.exists(src_fbx):
+        mb.capture_to_fbx(path, src_fbx)
+    _, J = mb.load_motion(path)
+
+    def nrm(v):
+        return v / np.linalg.norm(v)
+
+    def ang(a, b):
+        return math.degrees(math.acos(np.clip(np.dot(nrm(a), nrm(b)), -1, 1)))
+
+    def setup():
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        src = mb.import_animation(bpy.context, src_fbx)
+        dst = mb.create_mixamo_armature(bpy.context, {k: v * 0.95 for k, v in J.items()}, name="Perso", pose="A")
+        return src, dst
+
+    def edit(dst, fn):
+        bpy.context.view_layer.objects.active = dst
+        bpy.ops.object.mode_set(mode="EDIT")
+        fn(dst.data.edit_bones)
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+    def measure(src, dst):
+        sc = bpy.context.scene
+        ms, md = mb.bone_map(src), mb.bone_map(dst)
+        RD = {k: np.array(dst.matrix_world @ dst.data.bones[v].head_local) for k, v in md.items()}
+        res = dict(tip=[], foot=[], attach=[])
+        for f in range(sc.frame_start, sc.frame_end + 1, 9):
+            sc.frame_set(f)
+            HS = {k: np.array(src.matrix_world @ src.pose.bones[v].head) for k, v in ms.items()}
+            HD = {k: np.array(dst.matrix_world @ dst.pose.bones[v].head) for k, v in md.items()}
+            for S in ("Left", "Right"):
+                for fi in ("Index", "Middle", "Ring"):
+                    k2, k3, k4 = (f"{S}Hand{fi}{i}" for i in (2, 3, 4))
+                    pb = dst.pose.bones[md[k3]]
+                    R = np.array((dst.matrix_world @ pb.matrix).to_3x3().normalized()) @ \
+                        np.array((dst.matrix_world @ pb.bone.matrix_local).to_3x3().normalized()).T
+                    res["tip"].append(abs(ang(HS[k3] - HS[k2], HS[k4] - HS[k3])
+                                          - ang(HD[k3] - HD[k2], R @ (RD[k3] - RD[k2]))))
+                res["foot"].append(abs(ang(HS[f"{S}Foot"] - HS[f"{S}Leg"], HS[f"{S}ToeBase"] - HS[f"{S}Foot"])
+                                       - ang(HD[f"{S}Foot"] - HD[f"{S}Leg"], HD[f"{S}ToeBase"] - HD[f"{S}Foot"])))
+                for a_, b_ in ((f"{S}UpLeg", "Hips"), (f"{S}Arm", "Spine2")):
+                    res["attach"].append(abs(np.linalg.norm(HD[a_] - HD[b_]) - np.linalg.norm(RD[a_] - RD[b_])))
+        return {k: float(np.max(v)) if v else 0.0 for k, v in res.items()}, md
+
+    lines, allok = [], True
+    # 1. Unreal importé : pas d'os de bout, queues d'os au hasard (bones « Y » de l'import FBX)
+    src, dst = setup()
+    rng = np.random.default_rng(3)
+
+    def unreal(eb):
+        for b in list(eb):
+            if b.name.endswith(("4", "_End")):
+                eb.remove(b)
+        for b in eb:
+            if b.name.endswith(("3", "ToeBase", "Foot", "Hand")):
+                # comme un FBX importé : queue perpendiculaire à l'os (axe Y local de l'export)
+                v = b.tail - b.head
+                d = v.cross(mathutils.Vector(rng.normal(size=3))).normalized() * b.length
+                b.tail = b.head + d
+    edit(dst, unreal)
+    mb.transfer_motion(bpy.context, src, dst)
+    r, md = measure(src, dst)
+    good = r["tip"] < 3 and r["foot"] < 3 and r["attach"] < 0.005
+    allok &= good
+    lines.append(f"Unreal importé : bout des doigts {r['tip']:.1f}°, pied {r['foot']:.1f}° (écart max)")
+    # 2. Rigify : DEF- sous des os ORG immobiles, contrôleurs, os déformant hors chaîne
+    src, dst = setup()
+
+    def rigify(eb):
+        org = eb.new("ORG-spine")
+        org.head, org.tail = eb["mixamorig:Hips"].head, eb["mixamorig:Hips"].tail
+        orgs = eb.new("ORG-shoulder")
+        orgs.head, orgs.tail = eb["mixamorig:Spine2"].head, eb["mixamorig:Spine2"].tail
+        orgs.parent = org
+        pel = eb.new("ORG-pelvis.L")
+        pel.head = eb["mixamorig:LeftUpLeg"].head
+        pel.tail = pel.head + mathutils.Vector((0, 0, 0.05))
+        pel.parent = org
+        dp = eb.new("DEF-pelvis.L")
+        dp.head, dp.tail, dp.parent = pel.head, pel.tail, pel
+        for S in ("Left", "Right"):
+            eb[f"mixamorig:{S}UpLeg"].parent = org
+            eb[f"mixamorig:{S}Shoulder"].parent = orgs
+            for fi in ("Index", "Middle"):
+                c = eb.new(f"{fi.lower()}.01_master.{S[0]}")       # contrôleur Rigify
+                b1 = eb[f"mixamorig:{S}Hand{fi}1"]
+                c.head, c.tail, c.parent = b1.head, b1.tail, eb[f"mixamorig:{S}Hand"]
+    edit(dst, rigify)
+    ren = {"Hips": "DEF-spine", "Spine": "DEF-spine.001", "Spine1": "DEF-spine.002", "Spine2": "DEF-spine.003",
+           "Neck": "DEF-spine.004", "Head": "DEF-spine.006", "HeadTop_End": "DEF-spine.007"}
+    for S, s in (("Left", "L"), ("Right", "R")):
+        ren.update({f"{S}Shoulder": f"DEF-shoulder.{s}", f"{S}Arm": f"DEF-upper_arm.{s}",
+                    f"{S}ForeArm": f"DEF-forearm.{s}", f"{S}Hand": f"DEF-hand.{s}", f"{S}UpLeg": f"DEF-thigh.{s}",
+                    f"{S}Leg": f"DEF-shin.{s}", f"{S}Foot": f"DEF-foot.{s}", f"{S}ToeBase": f"DEF-toe.{s}",
+                    f"{S}Toe_End": f"DEF-toe_end.{s}"})
+        for fi, rn in (("Thumb", "thumb"), ("Index", "f_index"), ("Middle", "f_middle"), ("Ring", "f_ring"),
+                       ("Pinky", "f_pinky")):
+            for k in range(1, 5):
+                ren[f"{S}Hand{fi}{k}"] = f"DEF-{rn}.{k:02d}.{s}"
+    for short, new in ren.items():
+        b = dst.data.bones.get("mixamorig:" + short)
+        if b is not None:
+            b.name = new
+    for c in ("index", "middle"):          # contrôleurs aux noms proches des doigts
+        for s in ("L", "R"):
+            dst.data.bones[f"{c}.01_master.{s}"].name = f"f_{c}.01_master.{s}"
+    bpy.ops.mesh.primitive_cube_add(size=0.1, location=tuple(dst.matrix_world @ dst.data.bones["DEF-pelvis.L"].head_local))
+    cube = bpy.context.active_object
+    cube.vertex_groups.new(name="DEF-pelvis.L").add(list(range(8)), 1.0, "REPLACE")
+    cube.modifiers.new("Armature", "ARMATURE").object = dst
+    mb.transfer_motion(bpy.context, src, dst)
+    r, md = measure(src, dst)
+    sc = bpy.context.scene
+    drift = 0.0
+    for f in range(sc.frame_start, sc.frame_end + 1, 9):
+        sc.frame_set(f)
+        pel = dst.matrix_world @ dst.pose.bones["DEF-pelvis.L"].head
+        th = dst.matrix_world @ dst.pose.bones["DEF-thigh.L"].head
+        drift = max(drift, (pel - th).length)
+    fingers_def = all(md[f"{S}Hand{fi}1"].startswith("DEF-") for S in ("Left", "Right") for fi in ("Index", "Middle"))
+    good = r["attach"] < 0.005 and r["tip"] < 3 and fingers_def and drift < 0.005
+    allok &= good
+    lines.append(f"Rigify : membres rattachés à {r['attach'] * 1000:.1f} mm près, doigts sur les os DEF- "
+                 f"{'oui' if fingers_def else 'non'}, DEF-pelvis suit le bassin ({drift * 1000:.1f} mm)")
+    ok("squelettes importés (Unreal sans bouts, Rigify)", allok, " | ".join(lines))
+
+
 # --------------------------------------------------------------------------- 5b. boules imprécises
 
 def test_height(path):
@@ -969,6 +1106,7 @@ if __name__ == "__main__":
     test_default_character()
     test_transfer(path)
     test_rigs(path)
+    test_imported_rigs(path)
     n_ok = sum(1 for v in RESULTS.values() if v[0])
     print(f"\n{n_ok}/{len(RESULTS)} tests réussis")
     with open(os.path.join(OUT, "resultats.json"), "w", encoding="utf-8") as f:
