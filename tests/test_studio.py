@@ -55,6 +55,7 @@ class FakePhone:
         self.recording = False
         self.fov = 1.0
         self.preview_fps = None
+        self.facing = "back"
         self.snapshots = 0
         # le poco « rate » la première demande d'image (occupé à envoyer l'aperçu) :
         # Studio doit la redemander tout seul
@@ -86,7 +87,8 @@ class FakePhone:
                     t="status", battery=0.8 - 0.3 * self.ci, storage_free=20e9, fps=60, stabilization="off",
                     exposure=dict(duration=1 / 500, iso=400, mode="locked", focus="locked"),
                     recording=self.recording, locked=True, device="Back Camera", fov=self.fov,
-                    fov_options=[0.5, 0.7, 1, 1.5, 2], lens="ultra" if self.fov < 1 else "wide", app="1.1.0")))
+                    fov_options=[0.5, 0.7, 1, 1.5, 2], lens="ultra" if self.fov < 1 else "wide", app="1.1.0",
+                    facing=self.facing)))
                 await self.send_bin(1, self.small)
                 await asyncio.sleep(0.5)
 
@@ -108,6 +110,8 @@ class FakePhone:
             elif t == "config":
                 if "fov" in m:
                     self.fov = m["fov"]
+                if m.get("facing") in ("front", "back"):
+                    self.facing = m["facing"]
             elif t == "snapshot":
                 self.snapshots += 1
                 if self.ignore_first_snapshot and self.snapshots == 1:
@@ -384,10 +388,15 @@ async def main():
                     if seen:
                         break
                 live_img = await page.locator("#faceLiveImg").count()
+                # « Avant » reste sélectionné (le téléphone confirme sa caméra)
+                await page.locator("#faceNew button", has_text="Avant").click()
+                await page.wait_for_timeout(5000)
+                pressed = await page.locator("#faceNew button", has_text="Avant").get_attribute("aria-pressed")
+                ok("bouton Avant sélectionné", pressed == "true" and ph.facing == "front", f"aria-pressed={pressed}, téléphone {ph.facing}")
                 fps_live = ph.preview_fps
                 await page.evaluate("showPage('pTakes')")
                 await page.wait_for_timeout(1500)
-                ok("aperçu en direct du visage", live_img == 1 and fps_live == 10 and ph.preview_fps not in (None, 10)
+                ok("aperçu en direct du visage", live_img == 1 and fps_live == 30 and ph.preview_fps not in (None, 30)
                    and "visage" in seen.lower(),
                    f"aperçu à {fps_live} i/s puis {ph.preview_fps} i/s ; « {seen[:70]} »")
                 # « Ouvrir le dossier » ne coupe pas la connexion ; suppression d'une prise

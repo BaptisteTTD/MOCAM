@@ -35,7 +35,7 @@ from . import fbx, markers as mk, pipeline, sync
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "studio_ui")
 # version du serveur : l'interface (index.html) vérifie qu'elle parle au serveur de la même version
-STUDIO_VERSION = "1.7.0"
+STUDIO_VERSION = "1.8.0"
 
 # horloge du PC en ms (monotone, calée sur l'heure système au démarrage)
 _EPOCH = time.time() * 1000 - time.monotonic() * 1000
@@ -225,7 +225,7 @@ class Cam:
             device_type=st.get("device_type"), resolution=st.get("resolution"),
             res720=st.get("res720"), supports60=st.get("supports60"),
             lens=st.get("lens"), ultra_available=st.get("ultra_available"), zoom=st.get("zoom"),
-            fov=st.get("fov"), fov_options=st.get("fov_options"), app=self.status.get("app") or self.app,
+            fov=st.get("fov"), fov_options=st.get("fov_options"), facing=st.get("facing") or "back", app=self.status.get("app") or self.app,
             sync_ms=None if np.isnan(self.rtt) else round(self.rtt / 2, 1),
             preview_ts=self.preview_ts, check=self.check, take=self.take,
         )
@@ -374,6 +374,7 @@ class Studio:
                             duration=meta.get("duration_s"), camera=meta.get("camera"),
                             processed=os.path.exists(facemod.curves_path(p)), fbx=os.path.exists(o["fbx"]),
                             glb=os.path.exists(o["glb"]), frames=meta.get("frames"), fps=meta.get("fps"),
+                            view=os.path.getmtime(o["view"]) if os.path.exists(o["view"]) else 0,
                             lissage=meta.get("lissage", "moyen"), intensite=meta.get("intensite", 100)))
         return out[:80]
 
@@ -1095,7 +1096,8 @@ class Studio:
         v = facemod.find_video(d)
         if not v:
             raise web.HTTPNotFound()
-        return web.FileResponse(v)
+        up = facemod.outputs(d)["view"]          # vidéo redressée (filmée couchée)
+        return web.FileResponse(up if os.path.exists(up) else v, headers={"Cache-Control": "no-store"})
 
     async def handle_face_glb(self, request):
         from . import face as facemod
@@ -1171,15 +1173,7 @@ class Studio:
         if self.face_live:
             if self.face_tracker:
                 self.face_tracker.reset()
-            await self.send(self.cams[self.face_live], dict(t="preview", fps=max(self.preview_fps, 10.0)))
-
-    async def handle_face_mesh(self, request):
-        from . import face as facemod
-        try:
-            tris = await asyncio.get_running_loop().run_in_executor(None, facemod.mesh_triangles)
-        except Exception:  # noqa: BLE001
-            raise web.HTTPServiceUnavailable()
-        return web.json_response(dict(triangles=tris), headers={"Cache-Control": "max-age=3600"})
+            await self.send(self.cams[self.face_live], dict(t="preview", fps=30.0))
 
     async def on_face_ui(self, a, m):
         from . import face as facemod
@@ -1430,7 +1424,6 @@ class Studio:
     def app(self):
         app = web.Application(client_max_size=8 * 1024 ** 3)
         app.router.add_get("/", self.handle_index)
-        app.router.add_get("/visage-maillage.json", self.handle_face_mesh)
         app.router.add_get("/visage/{name}/video", self.handle_face_video)
         app.router.add_get("/visage/{name}/apercu.glb", self.handle_face_glb)
         app.router.add_get("/visage/{name}/courbes.json", self.handle_face_curves)

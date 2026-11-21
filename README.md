@@ -259,13 +259,15 @@ Blender, Character Creator, MetaHuman…). La tête reste fixe : seules les expr
 ![Onglet Visage : visage 3D et les 52 blendshapes](docs/tuto/11_visage.png)
 
 **Aperçu en direct** : sélectionnez *Aperçu en direct* en haut de la liste (ou cliquez sur
-l'image du téléphone). L'image de la caméra et le visage 3D suivi en temps réel s'affichent
-côte à côte, avec les 52 blendshapes : vérifiez le cadrage et la lumière avant d'enregistrer.
+l'image du téléphone). L'image de la caméra s'affiche en grand, fluide (30 images/s), avec les
+52 blendshapes en temps réel : vérifiez le cadrage et la lumière avant d'enregistrer.
 
 **Filmer depuis le téléphone** : dans l'app MOCAM, touchez **Visage** (en bas) : l'app passe
 sur la caméra avant et un gros bouton **REC** apparaît à droite. Touchez-le pour démarrer,
-touchez-le à nouveau pour arrêter : la vidéo part toute seule vers MOCAM Studio. Tenez le
-téléphone **à la verticale** : la vidéo et le visage 3D sont alors verticaux aussi.
+touchez-le à nouveau pour arrêter : la vidéo part toute seule vers MOCAM Studio. En mode
+Visage l'écran de l'app passe **à la verticale** : tenez le téléphone droit, la vidéo est
+verticale et à l'endroit. Une vidéo filmée « couchée » (importée, par exemple) est redressée
+automatiquement au traitement.
 
 **Filmer depuis le PC** : dans *Nouvelle capture du visage*, choisissez le téléphone, cliquez
 **Avant**, puis **Enregistrer le visage** et **Arrêter**. Ou cliquez **Importer une vidéo…**

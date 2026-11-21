@@ -339,7 +339,7 @@
 <script>
 let ws, S = null, serverDelta = 0, takeTyped = false, selTake = null, logText = '';
 const autoAnimated = new Set();   // prises où le personnage par défaut a été lancé automatiquement
-const UI_VERSION = '1.7.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
+const UI_VERSION = '1.8.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
 function newerVersion(a, b) {
   const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
   for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
@@ -378,7 +378,13 @@ function connect() {
       try { render(); }
       catch (e) { console.error(e); fatal('Erreur d\'affichage', `${e.message}\n\nRelancez MOCAM Studio.bat. Si l'erreur revient, envoyez ce message.`); }
     }
-    else if (m.type === 'preview') { document.querySelectorAll(`img[data-prev="${m.cam}"]`).forEach(img => { img.src = `/preview/${m.cam}?t=${m.ts}`; }); }
+    else if (m.type === 'preview') document.querySelectorAll(`img[data-prev="${m.cam}"]`).forEach(img => {
+      // image suivante seulement quand la précédente est affichée : fluide sans s'accumuler
+      if (img.dataset.loading === '1' && Date.now() - (+img.dataset.t || 0) < 1000) return;
+      img.dataset.loading = '1'; img.dataset.t = Date.now();
+      img.onload = img.onerror = () => { img.dataset.loading = ''; if (img.id === 'faceLiveImg') faceAspect(img.naturalWidth, img.naturalHeight, 'faceLiveView'); };
+      img.src = `/preview/${m.cam}?t=${m.ts}`;
+    });
     else if (m.type === 'face_live') faceLiveData(m);
     else if (m.type === 'log') { if (m.reset) logText = ''; logText += m.line + '\n'; for (const l of [$('log'), $('faceLog')]) if (l) { l.textContent = logText; l.scrollTop = l.scrollHeight; } }
     else if (m.type === 'toast') toast(m.msg, m.level);
@@ -799,7 +805,7 @@ function renderFace() {
   const tk = S.take && S.take.kind === 'visage' ? S.take : null;
   const rec = tk && ['starting', 'recording'].includes(tk.state), stopping = tk && tk.state === 'stopping';
   const cam = S.cams.find(c => c.id === faceCam);
-  const front = cam && cam.facing === 'front';
+  const front = cam && (facingWant[cam.id] && Date.now() - facingWant[cam.id].t < 4000 ? facingWant[cam.id].f : cam.facing) === 'front';
   const key = JSON.stringify([S.cams.map(c => [c.id, c.name, c.facing, !!c.preview_ts]), faceCam, tk && tk.state, tk && tk.name, faceSel === LIVE]);
   if (key !== faceKey) {
     faceKey = key;
@@ -808,9 +814,9 @@ function renderFace() {
       ${S.cams.length ? `
         <div class="row2"><select class="input" style="flex:1" onchange="faceCam=this.value; faceKey=''; faceDetailKey=''; renderFace()" ${rec || stopping ? 'disabled' : ''}>
           ${S.cams.map(c => `<option value="${esc(c.id)}" ${c.id === faceCam ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
-          <span class="seg"><button aria-pressed="${!!front}" onclick="send({a:'face_facing',cam:'${esc(faceCam)}',facing:'front'})" ${rec ? 'disabled' : ''}>Avant</button><button aria-pressed="${!front}" onclick="send({a:'face_facing',cam:'${esc(faceCam)}',facing:'back'})" ${rec ? 'disabled' : ''}>Arrière</button></span></div>
+          <span class="seg"><button aria-pressed="${!!front}" onclick="setFacing('front')" ${rec ? 'disabled' : ''}>Avant</button><button aria-pressed="${!front}" onclick="setFacing('back')" ${rec ? 'disabled' : ''}>Arrière</button></span></div>
         ${faceSel === LIVE ? '' : `<div class="prev" role="button" tabindex="0" onclick="selectFace(LIVE)">${cam && cam.preview_ts ? `<img data-prev="${esc(cam.id)}" src="/preview/${esc(cam.id)}?t=${cam.preview_ts}" alt="">` : 'En attente de l\'image…'}<span class="open">Aperçu en direct</span></div>`}
-        <p class="hint" style="margin:0">Visage de face, à 40–70 cm, bien éclairé de face, sans contre-jour. Tenez le téléphone à la verticale : la vidéo et le visage 3D le seront aussi.</p>
+        <p class="hint" style="margin:0">Visage de face, à 40–70 cm, bien éclairé de face, sans contre-jour. Tenez le téléphone à la verticale : la vidéo le sera aussi.</p>
         ${rec ? `<button class="recbtn stop" onclick="send({a:'stop'})">Arrêter</button>` :
           `<button class="recbtn" ${stopping ? 'disabled' : ''} onclick="send({a:'face_record',cam:'${esc(faceCam)}'})">${stopping ? 'Envoi de la vidéo…' : 'Enregistrer le visage'}</button>`}`
       : '<p class="hint" style="margin:0">Connectez un téléphone (onglet Tournage) pour filmer, ou importez une vidéo.</p>'}
@@ -818,7 +824,7 @@ function renderFace() {
   }
   $('facesList').innerHTML = (faceCam ? `<div class="tk live" role="button" tabindex="0" aria-selected="${faceSel === LIVE}" onclick="selectFace(LIVE)">
       <span class="n">Aperçu en direct</span><span class="st"><span class="hint">${esc(cam ? cam.name : '')}</span></span>
-      <span class="s">Le visage suivi en temps réel, avant d'enregistrer</span></div>` : '') +
+      <span class="s">L'image du téléphone à 30 i/s, avant d'enregistrer</span></div>` : '') +
     (L.length ? L.map(f => `<div class="tk" role="button" tabindex="0" aria-selected="${f.name === faceSel}" onclick="selectFace('${esc(f.name)}')">
       <span class="n">${esc(f.name)}</span><span class="st">${faceStatus(f)}</span>
       <span class="s">${f.created ? esc(f.created.slice(0, 16).replace(' ', ', ')) : ''}${f.duration ? ', ' + fr(f.duration) + ' s' : ''}</span>
@@ -826,6 +832,13 @@ function renderFace() {
     : '<div class="empty-page">Aucune capture du visage pour l\'instant.</div>');
   renderFaceDetail();
   faceLiveSync();
+}
+const facingWant = {};
+function setFacing(f) {
+  facingWant[faceCam] = { f, t: Date.now() };
+  send({ a: 'face_facing', cam: faceCam, facing: f });
+  faceKey = ''; renderFace();
+  setTimeout(() => { faceKey = ''; renderFace(); }, 4100);
 }
 function selectFace(n) { faceSel = n; faceKey = ''; renderFace(); }
 window.selectFace = selectFace;
@@ -839,17 +852,16 @@ function renderFaceLive(box) {
   faceDetailKey = key;
   box.innerHTML = `
     <div class="take-head"><div><h1>Aperçu en direct</h1>
-      <div class="sub">${esc(cam ? cam.name : '')} — le visage est suivi en temps réel, tête fixe, comme dans le FBX</div></div></div>
+      <div class="sub">${esc(cam ? cam.name : '')} — l'image du téléphone et les 52 blendshapes en temps réel</div></div></div>
     <div class="panel">
       <div class="face-view" id="faceLiveView">
         <div class="cam">${cam && cam.preview_ts ? `<img id="faceLiveImg" data-prev="${esc(cam.id)}" src="/preview/${esc(cam.id)}?t=${cam.preview_ts}" alt="Image de ${esc(cam.name)}">` : 'En attente de l\'image…'}</div>
-        <div class="viewer" id="faceLiveBox"><div class="empty" id="faceLiveEmpty">${rec ? 'Enregistrement en cours : l\'aperçu reprend à la fin.' : 'Recherche du visage…'}</div></div>
+        <div><div class="headvals" id="faceLiveState">${rec ? 'Enregistrement en cours : le suivi reprend à la fin.' : 'Recherche du visage…'}</div>
+        <div class="bars" id="faceBars"></div></div>
       </div>
-      <div class="headvals" id="faceLiveState"></div>
-      <div class="bars" id="faceBars"></div>
     </div>`;
   const img = document.getElementById('faceLiveImg');
-  if (img) img.onload = () => faceAspect(img.naturalWidth, img.naturalHeight, 'faceLiveView');
+  if (img) { img.dataset.loading = '1'; img.onload = img.onerror = () => { img.dataset.loading = ''; faceAspect(img.naturalWidth, img.naturalHeight, 'faceLiveView'); }; }
   liveBarsReady = false;
 }
 let liveBarsReady = false, liveOn = null;
@@ -858,7 +870,7 @@ function faceAspect(w, h, id) {
   if (el && w && h) el.style.setProperty('--ar', `${w} / ${h}`);
 }
 function faceLiveSync() {
-  const want = $('pFace').classList.contains('on') && faceSel === LIVE && faceCam ? faceCam : null;
+  const want = $('pFace').classList.contains('on') && faceCam ? faceCam : null;   // aperçu fluide (30 i/s)
   if (want === liveOn) return;
   liveOn = want;
   send({ a: 'face_live', cam: want || '', on: !!want });
@@ -876,7 +888,6 @@ function faceLiveData(m) {
     el.innerHTML = FACE_GROUPS.map(([g, test]) => `<h4>${g}</h4>` + ARKIT_NAMES.map((n, i) => test(n) ? `<div class="bar" title="${n}"><span>${n}</span><i><b data-i="${i}"></b></i></div>` : '').join('')).join('');
   }
   document.querySelectorAll('#faceBars b[data-i]').forEach(b => { b.style.width = (100 * m.w[+b.dataset.i]).toFixed(1) + '%'; });
-  if (window.mcFace) window.mcFace.live(m.v);
 }
 const ARKIT_NAMES = ['eyeBlinkLeft', 'eyeLookDownLeft', 'eyeLookInLeft', 'eyeLookOutLeft', 'eyeLookUpLeft', 'eyeSquintLeft', 'eyeWideLeft',
   'eyeBlinkRight', 'eyeLookDownRight', 'eyeLookInRight', 'eyeLookOutRight', 'eyeLookUpRight', 'eyeSquintRight', 'eyeWideRight',
@@ -898,7 +909,7 @@ function renderFaceDetail(force) {
   faceDetailKey = key;
   if (!f) { box.innerHTML = '<div class="empty-page">Filmez ou importez une vidéo de visage : une seule caméra suffit.</div>'; return; }
   const oldView = document.getElementById('faceView');
-  const keepView = oldView && oldView.dataset.face === f.name && oldView.dataset.glb === String(f.glb);
+  const keepView = oldView && oldView.dataset.face === f.name && oldView.dataset.glb === `${f.glb}|${f.view}`;
   const steps = running && P.kind === 'visage' ? `<div class="steps">${FACE_STEPS.map((t, i) => `<div class="step ${i + 1 < P.step ? 'done' : i + 1 === P.step ? 'cur' : ''}"><span class="n">${i + 1}</span><span>${t}</span></div>`).join('')}</div>` : '';
   box.innerHTML = `
     <div class="take-head">
@@ -938,8 +949,8 @@ function renderFaceDetail(force) {
   const slot = $('faceViewSlot');
   if (keepView) slot.replaceWith(oldView);
   else {
-    slot.outerHTML = `<div class="face-view" id="faceView" data-face="${esc(f.name)}" data-glb="${f.glb}">
-      ${f.video ? `<video id="faceVideo" src="/visage/${encodeURIComponent(f.name)}/video" controls playsinline muted loop preload="auto"></video>` : '<div class="viewer"><div class="empty">Pas de vidéo</div></div>'}
+    slot.outerHTML = `<div class="face-view" id="faceView" data-face="${esc(f.name)}" data-glb="${f.glb}|${f.view}">
+      ${f.video ? `<video id="faceVideo" src="/visage/${encodeURIComponent(f.name)}/video?v=${f.view}" controls playsinline muted loop preload="auto"></video>` : '<div class="viewer"><div class="empty">Pas de vidéo</div></div>'}
       <div class="viewer" id="faceBox"><div class="empty" id="faceEmpty">${f.glb ? 'Chargement du visage…' : 'Le visage 3D apparaît une fois la vidéo traitée.'}</div></div></div>`;
     const v = document.getElementById('faceVideo');
     if (v) v.addEventListener('loadedmetadata', () => faceAspect(v.videoWidth, v.videoHeight, 'faceView'));
@@ -1216,50 +1227,7 @@ window.mcFace = {
       if (empty) empty.remove();
     } catch (e) { if (empty) empty.textContent = 'Visage 3D indisponible : ' + e.message; }
   },
-  // aperçu direct : maillage du visage suivi (468 points, tête fixe) mis à jour à chaque image
-  async live(v) {
-    const box = document.getElementById('faceLiveBox');
-    if (!box || !v) return;
-    if (Lv.box !== box) {
-      if (Lv.r) { Lv.r.dispose(); Lv.r.domElement.remove(); }
-      Lv.box = box; Lv.geo = null;
-      Lv.r = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-      Lv.r.setPixelRatio(Math.min(2, devicePixelRatio));
-      Lv.r.outputColorSpace = THREE.SRGBColorSpace;
-      box.appendChild(Lv.r.domElement);
-      Lv.scene = new THREE.Scene();
-      Lv.cam = new THREE.PerspectiveCamera(30, 0.75, 0.01, 10);
-      Lv.cam.position.set(0, 0.01, 0.5);
-      Lv.ctl = new OrbitControls(Lv.cam, Lv.r.domElement);
-      Lv.ctl.target.set(0, 0.01, -0.04); Lv.ctl.enableDamping = true;
-      Lv.scene.add(new THREE.HemisphereLight(0xfff4ec, 0x30333a, 2.0));
-      const k = new THREE.DirectionalLight(0xffffff, 2.4); k.position.set(1, 1.5, 2); Lv.scene.add(k);
-      const rim = new THREE.DirectionalLight(0x9fb8ff, 1.2); rim.position.set(-2, 1, -1); Lv.scene.add(rim);
-      const fit = () => { const w = box.clientWidth, h = box.clientHeight; if (w && h) { Lv.r.setSize(w, h, false); Lv.cam.aspect = w / h; Lv.cam.updateProjectionMatrix(); } };
-      new ResizeObserver(fit).observe(box); fit();
-      const loop = () => { if (!Lv.r || Lv.box !== box) return; requestAnimationFrame(loop); if (box.offsetParent === null) return; Lv.ctl.update(); Lv.r.render(Lv.scene, Lv.cam); };
-      loop();
-    }
-    if (!Lv.geo) {
-      if (!Lv.tris) {
-        if (Lv.loading) return;
-        Lv.loading = true;
-        try { Lv.tris = (await (await fetch('/visage-maillage.json')).json()).triangles; } finally { Lv.loading = false; }
-      }
-      Lv.geo = new THREE.BufferGeometry();
-      Lv.geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(v.length), 3));
-      Lv.geo.setIndex(Lv.tris.flat());
-      const mesh = new THREE.Mesh(Lv.geo, new THREE.MeshStandardMaterial({ color: 0xd9b8a3, roughness: 0.6, side: THREE.DoubleSide }));
-      mesh.frustumCulled = false;
-      Lv.scene.add(mesh);
-      const e = document.getElementById('faceLiveEmpty'); if (e) e.remove();
-    }
-    Lv.geo.attributes.position.array.set(v);
-    Lv.geo.attributes.position.needsUpdate = true;
-    Lv.geo.computeVertexNormals();
-  },
 };
-const Lv = { r: null, box: null, geo: null, tris: null };
 if (window.mcRerender) window.mcRerender();
 
 // vignettes des personnages : rendu unique hors écran

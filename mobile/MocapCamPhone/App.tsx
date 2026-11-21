@@ -12,6 +12,8 @@ import {
   type LayoutChangeEvent,
 } from 'react-native'
 import { useKeepAwake } from 'expo-keep-awake'
+import * as ScreenOrientation from 'expo-screen-orientation'
+import { createSynchronizable, scheduleOnRN } from 'react-native-worklets'
 import * as Battery from 'expo-battery'
 import { File, Paths, UploadType } from 'expo-file-system'
 import {
@@ -23,6 +25,8 @@ import {
   useCameraDevices,
   useCameraPermission,
   useMicrophonePermission,
+  useFrameOutput,
+  HybridFrameConverter,
   useObjectOutput,
   usePhotoOutput,
   useVideoOutput,
@@ -46,7 +50,7 @@ import {
   type Settings,
 } from './src/settings'
 
-const APP_VERSION = '1.4.0'
+const APP_VERSION = '1.5.0'
 
 // Erreurs hors affichage (minuteries, callbacks natifs) : on les montre à l'écran
 // au lieu de laisser l'app se fermer.
@@ -63,6 +67,10 @@ const QR_TYPES: ScannedObjectType[] = ['qr']
 // ============================================================================ App
 
 export default function App() {
+  // corps : paysage ; le mode Visage passe en portrait (voir CaptureScreen)
+  useEffect(() => {
+    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {})
+  }, [])
   return (
     <ErrorBoundary>
       <AppInner />
@@ -305,9 +313,17 @@ function CaptureScreen({
   const [fov, setFov] = useState(1)
   // caméra avant : capture faciale (onglet Visage de MOCAM Studio)
   const [facing, setFacing] = useState<'back' | 'front'>('back')
-  // mode Visage (caméra avant) : la vidéo suit le téléphone (verticale s'il est vertical)
+  // mode Visage (caméra avant) : l'écran passe en portrait, la vidéo est verticale et à l'endroit
   const faceMode = facing === 'front'
-  const [uiRot, setUiRot] = useState(0)
+  const faceModeRef = useRef(faceMode)
+  faceModeRef.current = faceMode
+  useEffect(() => {
+    const lock = faceMode ? ScreenOrientation.OrientationLock.PORTRAIT_UP : ScreenOrientation.OrientationLock.LANDSCAPE
+    void ScreenOrientation.lockAsync(lock).catch(() => {})
+  }, [faceMode])
+  useEffect(() => () => {
+    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {})
+  }, [])
   const lensSetup = useMemo(() => {
     if (facing === 'front') {
       const front = allDevices.find((d) => d.position === 'front' && !d.isVirtualDevice) ??
@@ -376,11 +392,44 @@ function CaptureScreen({
     quality: 0.8,
     qualityPrioritization: 'balanced',
   })
+  // mode Visage : aperçu fluide (30 i/s) envoyé au PC depuis le flux de la caméra
+  const stream = useMemo(() => ({ on: createSynchronizable(false), busy: createSynchronizable(false),
+    last: createSynchronizable(0) }), [])
+  const streamAt = useRef(0)
+  const onStreamJpeg = useCallback((buf: ArrayBuffer) => {
+    clientRef.current?.sendBinary(1, buf)
+    streamAt.current = Date.now()
+    stream.busy.setBlocking(false)
+  }, [stream])
+  const frameOutput = useFrameOutput({
+    targetResolution: CommonResolutions.VGA_4_3,
+    pixelFormat: 'rgb',
+    enablePhysicalBufferRotation: true,
+    dropFramesWhileBusy: true,
+    onFrame(frame) {
+      'worklet'
+      try {
+        const now = Date.now()
+        if (!stream.on.getDirty() || stream.busy.getDirty() || now - stream.last.getDirty() < 30) return
+        stream.busy.setBlocking(true)
+        stream.last.setBlocking(now)
+        try {
+          const img = HybridFrameConverter.convertFrameToImage(frame)
+          const enc = img.toEncodedImageData('jpg', 60)
+          scheduleOnRN(onStreamJpeg, enc.buffer)
+        } catch {
+          stream.busy.setBlocking(false)
+        }
+      } finally {
+        frame.dispose()
+      }
+    },
+  })
   const liveRef = useRef({ device, videoOutput, res720, lensSetup })
   liveRef.current = { device, videoOutput, res720, lensSetup }
   const outputs = useMemo(
-    () => (Platform.OS === 'ios' ? [videoOutput, photoOutput] : [videoOutput]),
-    [videoOutput, photoOutput],
+    () => [videoOutput, ...(Platform.OS === 'ios' ? [photoOutput] : []), ...(faceMode ? [frameOutput] : [])],
+    [videoOutput, photoOutput, frameOutput, faceMode],
   )
   const constraints = useMemo<Constraint[]>(
     () => [
@@ -815,15 +864,20 @@ function CaptureScreen({
       while (alive) {
         const rec = !!recorderRef.current?.isRecording
         const fps = rec ? (Platform.OS === 'ios' ? 0 : Math.min(previewFps.current, 1)) : previewFps.current
-        if (fps > 0 && clientRef.current?.baseUrl) await sendSnapshot(1)
-        await new Promise((r) => setTimeout(r, fps > 0 ? 1000 / fps : 500))
+        // mode Visage : le flux de la caméra envoie l'aperçu ; les photos ne servent qu'en secours
+        const fluid = faceModeRef.current && fps >= 15 && !rec
+        stream.on.setBlocking(fluid)
+        if (fluid && Date.now() - streamAt.current > 3000) stream.busy.setBlocking(false)
+        const streaming = fluid && Date.now() - streamAt.current < 1500
+        if (fps > 0 && !streaming && clientRef.current?.baseUrl) await sendSnapshot(1)
+        await new Promise((r) => setTimeout(r, fps > 0 && !streaming ? 1000 / Math.min(fps, 10) : streaming ? 200 : 500))
       }
     }
     void loop()
     return () => {
       alive = false
     }
-  }, [sendSnapshot])
+  }, [sendSnapshot, stream])
 
   const onConfig = useCallback(
     (c: CameraSessionConfig) => {
@@ -873,8 +927,7 @@ function CaptureScreen({
           zoom={lensSetup.zoom}
           resizeMode="contain"
           enableDistortionCorrection={device.supportsDistortionCorrection ? true : undefined}
-          orientationSource={faceMode ? 'device' : 'interface'}
-          onUIRotationChanged={setUiRot}
+          orientationSource="interface"
           mirrorMode="off"
           onSessionConfigSelected={onConfig}
           onError={(e) => flash(`Caméra : ${e.message}`)}
@@ -955,11 +1008,11 @@ function CaptureScreen({
             disabled={conn.state !== 'connected' || (!recording && !!upload)}
             onPress={() => clientRef.current?.send({ t: 'face_record' })}
             style={[styles.faceRec, conn.state !== 'connected' ? { opacity: 0.4 } : null,
-              { transform: [{ rotate: `${uiRot}deg` }] }]}
+            ]}
           >
             <View style={recording ? styles.faceRecStop : styles.faceRecDot} />
           </Pressable>
-          <Text style={[styles.small, { transform: [{ rotate: `${uiRot}deg` }] }]}>
+          <Text style={styles.small}>
             {conn.state !== 'connected' ? 'Non connecté' : recording ? 'Arrêter' : upload ? 'Envoi…' : 'REC visage'}
           </Text>
         </View>
@@ -1098,7 +1151,7 @@ const styles = StyleSheet.create({
   rec: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   recDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#ff3b30' },
   faceOn: { borderColor: '#3ddc84', backgroundColor: '#3ddc8433' },
-  faceRecWrap: { position: 'absolute', right: 24, top: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', gap: 8 },
+  faceRecWrap: { position: 'absolute', left: 0, right: 0, bottom: 96, alignItems: 'center', gap: 8 },
   faceRec: {
     width: 76, height: 76, borderRadius: 38, borderWidth: 4, borderColor: '#fff',
     alignItems: 'center', justifyContent: 'center', backgroundColor: '#0006',

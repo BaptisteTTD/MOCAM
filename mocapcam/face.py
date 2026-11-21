@@ -17,6 +17,7 @@ Sorties dans le dossier de la prise de visage :
 import json
 import math
 import os
+import subprocess
 import time
 import urllib.request
 
@@ -95,9 +96,67 @@ def _mediapipe(log=print):
 
 
 # ------------------------------------------------------------------------------------- suivi
-def track(video_path, log=print, progress=None):
+ROTATIONS = {90: "ROTATE_90_CLOCKWISE", 180: "ROTATE_180", 270: "ROTATE_90_COUNTERCLOCKWISE"}
+
+
+def _rotate(frame, rot):
+    import cv2
+    return cv2.rotate(frame, getattr(cv2, ROTATIONS[rot])) if rot in ROTATIONS else frame
+
+
+def detect_rotation(video_path, log=print, samples=9):
+    """Rotation (degrés, sens horaire) qui met le visage à l'endroit : 0, 90, 180 ou 270.
+    Une vidéo filmée téléphone vertical mais enregistrée « couchée » est ainsi redressée."""
+    import cv2
+    mp, BaseOptions, fl, Mode = _mediapipe(log)
+    cap = cv2.VideoCapture(video_path)
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    frames = []
+    for k in range(samples):
+        if n > 0:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int((k + 0.5) * n / samples))
+        good, fr = cap.read()
+        if good:
+            frames.append(fr)
+    cap.release()
+    opts = fl.FaceLandmarkerOptions(base_options=BaseOptions(model_asset_path=ensure_model(log)),
+                                    running_mode=Mode.IMAGE, num_faces=1, min_face_detection_confidence=0.4)
+    score = {r: 0 for r in (0, 90, 180, 270)}
+    with fl.FaceLandmarker.create_from_options(opts) as det:
+        for fr in frames:
+            for rot in score:
+                im = _rotate(fr, rot)
+                r = det.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(im, cv2.COLOR_BGR2RGB)))
+                if r.face_landmarks:
+                    top, chin = r.face_landmarks[0][10], r.face_landmarks[0][152]
+                    dy, dx = (chin.y - top.y) * im.shape[0], (chin.x - top.x) * im.shape[1]
+                    if dy > abs(dx):                   # menton sous le front : visage à l'endroit
+                        score[rot] += 1
+    best = max(score, key=lambda r: (score[r], r == 0))
+    return best if score[best] > score[0] else 0
+
+
+def write_upright(video_path, out_path, rot, log=print):
+    """Copie de la vidéo redressée (H.264, lisible dans MOCAM Studio)."""
+    from .video import ffmpeg_exe
+    vf = {90: "transpose=1", 180: "transpose=1,transpose=1", 270: "transpose=2"}[rot]
+    cmd = [ffmpeg_exe(), "-y", "-loglevel", "error", "-i", video_path, "-vf", vf, "-c:v", "libx264",
+           "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart",
+           out_path]
+    r = subprocess.run(cmd, capture_output=True, text=True, **_no_window())
+    if r.returncode != 0:
+        log("    vidéo redressée non créée : " + (r.stderr or "")[-300:])
+        return False
+    return True
+
+
+def _no_window():
+    return dict(creationflags=0x08000000) if os.name == "nt" else {}
+
+
+def track(video_path, log=print, progress=None, rotation=0):
     """Suivi image par image. Renvoie dict(fps, size, t, weights (N,51), names, mats (N,4,4),
-    lm (N,478,3) en pixels, ok (N,))."""
+    lm (N,478,3) en pixels, ok (N,)). `rotation` redresse les images avant le suivi."""
     import cv2
     mp, BaseOptions, fl, Mode = _mediapipe(log)
     model = ensure_model(log)
@@ -120,6 +179,7 @@ def track(video_path, log=print, progress=None):
             good, frame = cap.read()
             if not good:
                 break
+            frame = _rotate(frame, rotation)
             h, w = frame.shape[:2]
             size = (w, h)
             img = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
@@ -508,7 +568,8 @@ def outputs(face_dir):
     n = face_dir_take(face_dir)
     return dict(json=os.path.join(face_dir, "mocapcam", f"{n}.json"),
                 fbx=os.path.join(face_dir, f"{n}.fbx"), glb=os.path.join(face_dir, "mocapcam", f"{n}.glb"),
-                raw=os.path.join(face_dir, "mocapcam", f"{n}_suivi.npz"))
+                raw=os.path.join(face_dir, "mocapcam", f"{n}_suivi.npz"),
+                view=os.path.join(face_dir, "mocapcam", f"{n}_vue.mp4"))
 
 
 def curves_path(face_dir):
@@ -549,14 +610,23 @@ def run(face_dir, studio_dir=None, blender=None, log=print, retrack=False):
         raise RuntimeError("pas de vidéo dans ce dossier")
     os.makedirs(os.path.dirname(out["raw"]), exist_ok=True)
     log("1/3 suivi du visage, image par image")
-    if retrack or not os.path.exists(out["raw"]) or os.path.getmtime(out["raw"]) < os.path.getmtime(video):
+    if (retrack or "rotation" not in meta or not os.path.exists(out["raw"])
+            or os.path.getmtime(out["raw"]) < os.path.getmtime(video)):
         last = [0.0]
+        rot = detect_rotation(video, log)
+        meta["rotation"] = rot
+        write_meta(face_dir, rotation=rot)
+        if os.path.exists(out["view"]):
+            os.remove(out["view"])
+        if rot:
+            log(f"    vidéo couchée : redressée de {rot}° pour la voir à l'endroit")
+            write_upright(video, out["view"], rot, log)
 
         def prog(i, n):
             if time.time() - last[0] > 2:
                 last[0] = time.time()
                 log(f"    {i} images" + (f" sur {n}" if n else ""))
-        raw = track(video, log, prog)
+        raw = track(video, log, prog, rot)
         np.savez_compressed(out["raw"], fps=raw["fps"], size=np.array(raw["size"]), t=raw["t"],
                             weights=raw["weights"], names=np.array(raw["names"]), mats=raw["mats"],
                             lm=raw["lm"].astype(np.float32), ok=raw["ok"])
@@ -597,16 +667,15 @@ def run(face_dir, studio_dir=None, blender=None, log=print, retrack=False):
 # ------------------------------------------------------------------------------------- aperçu direct
 class LiveTracker:
     """Suivi image par image de l'aperçu envoyé par le téléphone (MOCAM Studio, onglet Visage) :
-    52 valeurs ARKit et le maillage du visage, tête fixe (rotation et déplacement retirés)."""
+    les 52 valeurs ARKit."""
 
     def __init__(self, log=print):
         self.log = log
         self.det = None
-        self.ref = None
         self.t0 = time.monotonic()
 
     def reset(self):
-        self.ref = None
+        pass
 
     def _open(self):
         mp, BaseOptions, fl, Mode = _mediapipe(self.log)
@@ -635,15 +704,5 @@ class LiveTracker:
         for s in ("Left", "Right"):            # MediaPipe plafonne vers 0,6 pour un œil fermé
             j = ARKIT.index("eyeBlink" + s)
             wts[j] = float(np.clip((wts[j] - 0.1) / 0.5, 0, 1))
-        lm = np.array([[p.x * w, -p.y * h, -p.z * w] for p in r.face_landmarks[0][:468]])
-        if self.ref is None:
-            self.ref = lm
-        A = _align(lm, self.ref, STABLE)
-        k = 0.19 / max(1e-6, np.linalg.norm(A[10] - A[152]))
-        A = (A - A[[1]]) * k
-        return dict(found=True, size=[w, h], w=[round(x, 3) for x in wts],
-                    v=np.round(A.reshape(-1), 4).tolist())
+        return dict(found=True, size=[w, h], w=[round(x, 3) for x in wts])
 
-
-def mesh_triangles():
-    return _triangles()
