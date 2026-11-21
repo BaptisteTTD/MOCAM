@@ -23,7 +23,8 @@ import urllib.request
 
 import numpy as np
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from .paths import FROZEN, ROOT
+
 MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/"
              "float16/latest/face_landmarker.task")
 MODEL_PATH = os.path.join(ROOT, "modeles", "face_landmarker.task")
@@ -73,6 +74,8 @@ def _install_mediapipe(log=print):
     """MediaPipe s'installe tout seul au premier traitement de visage (pip, environnement MOCAM)."""
     import subprocess
     import sys
+    if FROZEN:
+        raise RuntimeError("MediaPipe manque dans MOCAM Studio.exe : retéléchargez MOCAM Studio")
     log("installation de MediaPipe (une seule fois, environ 1 minute)…")
     r = subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "mediapipe"],
                        capture_output=True, text=True)
@@ -83,7 +86,9 @@ def _install_mediapipe(log=print):
 def _mediapipe(log=print):
     try:
         import mediapipe  # noqa: F401
-    except ImportError:
+    except ImportError as e:
+        if FROZEN:
+            raise RuntimeError(f"MediaPipe ne se charge pas dans MOCAM Studio.exe ({e})") from e
         _install_mediapipe(log)
     try:
         from mediapipe.tasks.python import BaseOptions

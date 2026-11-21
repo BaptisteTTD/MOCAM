@@ -22,3 +22,7 @@ personnages_fournis/*
 
 # modèles téléchargés (MediaPipe…)
 modeles/
+
+# Construction de MOCAM Studio.exe (PyInstaller)
+build/
+dist/

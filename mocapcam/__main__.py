@@ -8,14 +8,14 @@
   python -m mocapcam taille      DOSSIER_PRISE TAILLE_CM      (prise déjà traitée)
   python -m mocapcam animer      STUDIO DOSSIER_PRISE PERSONNAGE  (personnage de studio/personnages)
   python -m mocapcam visage      DOSSIER_VISAGE [--studio S] [--retraiter]   (capture faciale)
+  python -m mocapcam diagnostic  vérifie les modèles, ffmpeg et Blender
 """
 import argparse
 import os
 import sys
 
 from . import intrinsics, pipeline, video
-
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from .paths import ROOT
 
 
 def main(argv=None):
@@ -72,6 +72,8 @@ def main(argv=None):
     p.add_argument("--blender")
     p.add_argument("--retraiter", action="store_true", help="refaire le suivi du visage")
 
+    sub.add_parser("diagnostic", help="vérifie que tout est prêt (modèles, ffmpeg, Blender)")
+
     a = ap.parse_args(argv)
     try:
         if a.cmd == "studio":
@@ -98,6 +100,8 @@ def main(argv=None):
             st = a.studio if os.path.isdir(a.studio) else None
             bl = a.blender or ((pipeline.load_studio(st) or {}).get("blender") if st else None)
             face.run(a.dossier, studio_dir=st, blender=bl, retrack=a.retraiter)
+        elif a.cmd == "diagnostic":
+            return diagnostic()
         elif a.cmd == "init":
             path = pipeline.init_studio(a.studio)
             print(f"Studio créé : {path}\nMesurez la position de vos boules et éditez ce fichier.")
@@ -126,6 +130,41 @@ def main(argv=None):
         print(f"\nERREUR : {e}", file=sys.stderr)
         return 1
     return 0
+
+
+def diagnostic():
+    """Vérifie chaque brique : détection du corps (RTMW), du visage (MediaPipe), ffmpeg, Blender."""
+    import numpy as np
+    from . import fbx, face
+    bad = 0
+
+    def step(label, fn):
+        nonlocal bad
+        try:
+            print(f"[OK] {label} : {fn()}")
+        except Exception as e:  # noqa: BLE001
+            bad += 1
+            print(f"[ÉCHEC] {label} : {type(e).__name__} : {e}")
+    step("ffmpeg", video.ffmpeg_exe)
+
+    def body():
+        from rtmlib import Wholebody
+        m = Wholebody(mode="balanced", backend="onnxruntime", device="cpu", to_openpose=False)
+        k, _ = m(np.zeros((480, 640, 3), np.uint8))
+        return f"modèle chargé, {np.asarray(k).shape[-2] if k is not None and len(k) else 0} points"
+    step("détection du corps (RTMW)", body)
+
+    def visage():
+        mp, BaseOptions, fl, Mode = face._mediapipe()
+        opts = fl.FaceLandmarkerOptions(base_options=BaseOptions(model_asset_path=face.ensure_model()),
+                                        running_mode=Mode.IMAGE, output_face_blendshapes=True)
+        with fl.FaceLandmarker.create_from_options(opts) as det:
+            det.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=np.zeros((256, 256, 3), np.uint8)))
+        return "modèle chargé"
+    step("détection du visage (MediaPipe)", visage)
+    b = fbx.find_blender()
+    print(f"[{'OK' if b else 'MANQUE'}] Blender : {b or 'introuvable (installez-le depuis blender.org)'}")
+    return 1 if bad else 0
 
 
 if __name__ == "__main__":

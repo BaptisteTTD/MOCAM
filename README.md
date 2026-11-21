@@ -37,7 +37,7 @@ Ce que vous obtenez pour chaque prise :
 
 ## 1. Ce qu'il vous faut
 
-* **Un PC Windows** avec Python 3.11 ou 3.12 et **Blender** (gratuit, blender.org).
+* **Un PC Windows** avec **Blender** (gratuit, blender.org).
 * **Deux téléphones ou plus**, récents (testé avec un iPhone 12 Pro et un Poco X3 NFC), un trépied par téléphone.
 * **Cinq demi-boules** de couleur vive et mate : 2 rouges, 1 verte, 1 bleue, 1 jaune.
 * Un réseau commun : le Wi-Fi de la maison, ou le partage de connexion d'un téléphone.
@@ -46,13 +46,20 @@ Ce que vous obtenez pour chaque prise :
 
 ### Sur le PC (une fois)
 
-1. Installez **Python 3.11 ou 3.12** depuis python.org, en cochant *Add python.exe to PATH*.
-2. Installez **Blender**.
-3. Double-cliquez sur **`installer.bat`** dans le dossier de MOCAM. Il installe tout le
-   nécessaire. Au premier traitement, les modèles de détection (environ 200 Mo) se téléchargent
-   tout seuls.
+1. Téléchargez **`MOCAM-Studio-Windows.zip`** dans la page **Releases** du dépôt GitHub, et
+   décompressez-le où vous voulez (par exemple `Documents\MOCAM`). Python n'est pas nécessaire :
+   tout est dans le dossier.
+2. Installez **Blender** (gratuit, blender.org) : MOCAM s'en sert pour créer les FBX.
+3. Double-cliquez sur **`MOCAM Studio.exe`**. Un raccourci est créé sur le Bureau. Au premier
+   traitement, les modèles de détection (environ 200 Mo) se téléchargent tout seuls.
 
-Pour lancer le logiciel ensuite : double-clic sur **`MOCAM Studio.bat`**.
+Windows peut afficher « Windows a protégé votre ordinateur » : *Informations complémentaires*,
+puis *Exécuter quand même* (le programme n'est pas signé). Pour tout vérifier, lancez
+`"MOCAM Studio.exe" diagnostic` dans une invite de commandes.
+
+**Depuis le code source** (pour modifier MOCAM) : installez Python 3.11 ou 3.12, double-cliquez
+sur `installer.bat`, puis lancez `MOCAM Studio.bat`. `MOCAM Studio.exe` est reconstruit tout
+seul par GitHub (onglet *Actions*, « MOCAM Studio Windows ») à chaque modification du Studio.
 
 ### Sur les téléphones (une fois)
 

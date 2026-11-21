@@ -32,7 +32,8 @@ from aiohttp import WSMsgType, web
 
 from . import fbx, markers as mk, pipeline, sync
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from .paths import FROZEN, ROOT, self_command
+
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "studio_ui")
 # version du serveur : l'interface (index.html) vérifie qu'elle parle au serveur de la même version
 STUDIO_VERSION = "1.8.0"
@@ -951,8 +952,8 @@ class Studio:
             cmd = ["taille", d, str(job["args"][0]), "--studio", self.studio_dir]
         else:
             cmd = ["animer", self.studio_dir, d, job["args"][0]]
-        cmd = [sys.executable, "-u", "-m", "mocapcam", *cmd]
-        env = dict(os.environ, PYTHONPATH=ROOT, PYTHONIOENCODING="utf-8")
+        cmd = [*self_command(), *cmd]
+        env = dict(os.environ, PYTHONPATH=ROOT, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
         self.proc = dict(take=take, running=True, ok=None, kind=kind, label=job["label"], step=0, step_label="")
         await self.broadcast(dict(type="log", line=f"=== {job['label']} : {take} ===", reset=True))
         self.changed()
@@ -1469,8 +1470,10 @@ def make_shortcuts():
     le Bureau (créé une fois ; un .bat ne peut pas avoir d'icône)."""
     if not sys.platform.startswith("win"):
         return
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    bat, ico = os.path.join(root, "MOCAM Studio.bat"), os.path.join(UI_DIR, "mocam.ico")
+    root = ROOT
+    # MOCAM Studio.exe porte déjà son icône ; en développement, le raccourci lance le .bat
+    bat = sys.executable if FROZEN else os.path.join(root, "MOCAM Studio.bat")
+    ico = sys.executable if FROZEN else os.path.join(UI_DIR, "mocam.ico")
     if not (os.path.exists(bat) and os.path.exists(ico)):
         return
     ps = ("$s=New-Object -ComObject WScript.Shell; "

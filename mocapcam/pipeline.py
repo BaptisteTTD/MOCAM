@@ -11,6 +11,7 @@ import cv2
 import numpy as np
 
 from . import autocalib, fbx, intrinsics, markers as mk, motion_opt, pose2d, sync, syncbody, triangulate, video
+from .paths import ROOT
 from .skeleton import INDEX, JOINT_NAMES
 
 DEFAULT_STUDIO = {
@@ -396,7 +397,7 @@ def get_character(studio_dir, cid):
 # personnages fournis avec le programme (ex. Y Bot de Mixamo) : fichiers posés dans ce dossier,
 # installés tout seuls dans studio/personnages/ et animés par défaut. Ce dossier n'est pas
 # publié sur GitHub (les fichiers Mixamo ne peuvent pas être redistribués tels quels).
-BUNDLED_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "personnages_fournis")
+BUNDLED_DIR = os.path.join(ROOT, "personnages_fournis")
 MODEL_EXTS = (".fbx", ".glb", ".gltf", ".blend")
 
 

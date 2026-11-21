@@ -20,8 +20,12 @@ os.makedirs(take)
 ff = video.ffmpeg_exe()
 
 
+# MOCAM_EXE : tester MOCAM Studio.exe (version empaquetée) au lieu de python -m mocapcam
+CMD = [os.environ["MOCAM_EXE"]] if os.environ.get("MOCAM_EXE") else [sys.executable, "-m", "mocapcam"]
+
+
 def run(*args):
-    r = subprocess.run([sys.executable, "-m", "mocapcam", *args], cwd=ROOT, capture_output=True, text=True)
+    r = subprocess.run([*CMD, *args], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
     print(r.stdout[-1500:], r.stderr[-1500:])
     assert r.returncode == 0, args
     return r.stdout
