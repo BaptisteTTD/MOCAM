@@ -1,4 +1,4 @@
-# Construit MOCAM Studio.exe pour Windows (Python et bibliothèques compris), sur les serveurs
+# Construit MOCAM Studio.exe pour Windows (Python, bibliothèques et Blender compris), sur les serveurs
 # de GitHub, puis le vérifie et le publie.
 # Résultat : page "Releases" du dépôt, fichier MOCAM-Studio-Windows.zip (et rubrique
 # "Artifacts" du lancement).
@@ -25,12 +25,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"      # version exigée par bpy (Blender intégré)
           cache: pip
       - name: Dépendances
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          pip install -r requirements.txt pyinstaller bpy
       - name: MOCAM Studio.exe
         run: pyinstaller packaging/mocam_studio.spec --noconfirm
       - name: Fichiers d'accompagnement
@@ -40,7 +40,7 @@ jobs:
           New-Item -ItemType Directory "$d/personnages_fournis" -Force | Out-Null
           Copy-Item personnages_fournis/LISEZMOI.txt "$d/personnages_fournis/"
           Copy-Item packaging/LISEZMOI.txt "$d/"
-      - name: Vérification (modèles, ffmpeg, démarrage du Studio)
+      - name: Vérification (modèles, ffmpeg, Blender intégré, démarrage du Studio)
         shell: pwsh
         run: |
           $d = (Resolve-Path "dist/MOCAM Studio").Path
@@ -82,5 +82,5 @@ jobs:
             gh release upload "$tag" MOCAM-Studio-Windows.zip --clobber
           else
             gh release create "$tag" MOCAM-Studio-Windows.zip --title "MOCAM Studio ${STUDIO_VERSION} (Windows)" \
-              --notes "Décompressez, installez Blender (blender.org), puis lancez MOCAM Studio.exe. Voir LISEZMOI.txt."
+              --notes "Décompressez, puis lancez MOCAM Studio.exe (rien d'autre à installer). Voir LISEZMOI.txt."
           fi

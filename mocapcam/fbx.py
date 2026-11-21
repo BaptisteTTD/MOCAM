@@ -4,6 +4,7 @@ Blender est trouvé tout seul (Program Files, Steam, PATH…) ; sinon, indiquez 
 dans studio.json, clé "blender" (ex. "C:\\\\Program Files\\\\Blender Foundation\\\\Blender 5.1\\\\blender.exe").
 """
 import glob
+import importlib.util
 import json
 import os
 import re
@@ -11,7 +12,27 @@ import shutil
 import subprocess
 import sys
 
+from .paths import FROZEN, self_command
+
 SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "blender_script.py")
+
+
+def bundled_blender():
+    """Blender intégré (module bpy, fourni dans MOCAM Studio.exe) : pas besoin d'installer Blender."""
+    if FROZEN:
+        return os.path.isdir(os.path.join(getattr(sys, "_MEIPASS", ""), "bpy"))
+    return os.environ.get("MOCAM_BPY") == "1" and importlib.util.find_spec("bpy") is not None
+
+
+def engine(blender=None):
+    """Commande qui exécute blender_script.py, ou None. MOCAM Studio.exe utilise son Blender
+    intégré ; depuis le code source, le Blender installé (MOCAM_BPY=1 : le module bpy)."""
+    if bundled_blender():
+        return [*self_command(), "blender", "--"]
+    exe = find_blender(blender)
+    if exe:
+        return [exe, "-b", "--factory-startup", "--python-exit-code", "1", "--python", SCRIPT, "--"]
+    return None
 
 
 def _version_key(path):
@@ -52,18 +73,17 @@ def find_blender(configured=None):
 def export(mocap_json, fbx_path=None, blender=None, root_mode="RELATIVE", log=print, timeout=900):
     """Crée <prise>.fbx à côté de la capture (rig Mixamo animé, sans maillage).
     Retourne le chemin, ou None."""
-    exe = find_blender(blender)
-    if not exe:
-        log("  FBX non créé : Blender introuvable. Indiquez son chemin dans studio.json "
-            '(clé "blender"), puis lancez : mocapcam fbx <dossier de la prise>.')
+    eng = engine(blender)
+    if not eng:
+        log("  FBX non créé : Blender introuvable. Installez Blender (blender.org) ou indiquez son "
+            'chemin dans studio.json (clé "blender").')
         return None
     if not fbx_path:
         d, f = os.path.split(os.path.abspath(mocap_json))
         if os.path.basename(d) == "mocapcam":            # données de travail -> FBX dans la prise
             d = os.path.dirname(d)
         fbx_path = os.path.join(d, re.sub(r"(\.mocap)?\.json$", "", f) + ".fbx")
-    cmd = [exe, "-b", "--factory-startup", "--python-exit-code", "1", "--python", SCRIPT,
-           "--", os.path.abspath(mocap_json), os.path.abspath(fbx_path), root_mode]
+    cmd = [*eng, os.path.abspath(mocap_json), os.path.abspath(fbx_path), root_mode]
     try:
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -75,7 +95,7 @@ def export(mocap_json, fbx_path=None, blender=None, root_mode="RELATIVE", log=pr
     m = re.search(r"MOCAPCAM_FBX_OK (\{.*\})", out)
     if r.returncode != 0 or not m or not os.path.exists(fbx_path):
         tail = "\n    ".join(out.strip().splitlines()[-12:])
-        log(f"  FBX non créé : erreur de Blender ({exe}) :\n    {tail}")
+        log(f"  FBX non créé : erreur de Blender :\n    {tail}")
         return None
     rep = json.loads(m.group(1))
     log(f"  FBX : {fbx_path} ({rep.get('bones')} os Mixamo, {rep.get('frames')} images à "
@@ -84,12 +104,12 @@ def export(mocap_json, fbx_path=None, blender=None, root_mode="RELATIVE", log=pr
 
 
 def _run_blender(args, marker, blender=None, log=print, timeout=1800):
-    exe = find_blender(blender)
-    if not exe:
+    eng = engine(blender)
+    if not eng:
         log("  Blender introuvable : installez Blender (gratuit) ou indiquez son chemin dans studio.json "
             '(clé "blender").')
         return None
-    cmd = [exe, "-b", "--factory-startup", "--python-exit-code", "1", "--python", SCRIPT, "--", *args]
+    cmd = [*eng, *args]
     try:
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",

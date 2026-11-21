@@ -37,7 +37,7 @@ Ce que vous obtenez pour chaque prise :
 
 ## 1. Ce qu'il vous faut
 
-* **Un PC Windows** avec **Blender** (gratuit, blender.org).
+* **Un PC Windows** (rien d'autre à installer).
 * **Deux téléphones ou plus**, récents (testé avec un iPhone 12 Pro et un Poco X3 NFC), un trépied par téléphone.
 * **Cinq demi-boules** de couleur vive et mate : 2 rouges, 1 verte, 1 bleue, 1 jaune.
 * Un réseau commun : le Wi-Fi de la maison, ou le partage de connexion d'un téléphone.
@@ -47,17 +47,16 @@ Ce que vous obtenez pour chaque prise :
 ### Sur le PC (une fois)
 
 1. Téléchargez **`MOCAM-Studio-Windows.zip`** dans la page **Releases** du dépôt GitHub, et
-   décompressez-le où vous voulez (par exemple `Documents\MOCAM`). Python n'est pas nécessaire :
-   tout est dans le dossier.
-2. Installez **Blender** (gratuit, blender.org) : MOCAM s'en sert pour créer les FBX.
-3. Double-cliquez sur **`MOCAM Studio.exe`**. Un raccourci est créé sur le Bureau. Au premier
+   décompressez-le où vous voulez (par exemple `Documents\MOCAM`). Rien d'autre à installer :
+   Python et Blender (qui sert à créer les FBX) sont dans le dossier.
+2. Double-cliquez sur **`MOCAM Studio.exe`**. Un raccourci est créé sur le Bureau. Au premier
    traitement, les modèles de détection (environ 200 Mo) se téléchargent tout seuls.
 
 Windows peut afficher « Windows a protégé votre ordinateur » : *Informations complémentaires*,
 puis *Exécuter quand même* (le programme n'est pas signé). Pour tout vérifier, lancez
 `"MOCAM Studio.exe" diagnostic` dans une invite de commandes.
 
-**Depuis le code source** (pour modifier MOCAM) : installez Python 3.11 ou 3.12, double-cliquez
+**Depuis le code source** (pour modifier MOCAM) : installez Python 3.11 ou 3.12 et Blender, double-cliquez
 sur `installer.bat`, puis lancez `MOCAM Studio.bat`. `MOCAM Studio.exe` est reconstruit tout
 seul par GitHub (onglet *Actions*, « MOCAM Studio Windows ») à chaque modification du Studio.
 
@@ -340,7 +339,7 @@ est fait pour vous.
 | Doigts qui tremblent | Rapprochez les caméras et éclairez mieux. |
 | Un bras ou une jambe qui « saute » | Le membre était caché pour une caméra : orientez l'action face aux caméras, ou ajoutez un 3ᵉ téléphone. |
 | Personnage refusé | Il faut un squelette humanoïde (bassin, colonne, cou, tête, bras, jambes). Studio indique les os qu'il n'a pas reconnus. |
-| « Blender introuvable » | Installez Blender depuis blender.org. |
+| « Blender introuvable » | Seulement depuis le code source : installez Blender (blender.org). MOCAM Studio.exe a son propre Blender. |
 | Visage : « aucun visage trouvé » | Cadrez le visage de face, plus près, avec plus de lumière. |
 | Visage : gauche et droite inversées | Cochez *Vidéo en miroir* dans les réglages du visage. |
 | L'app iPhone ne s'ouvre plus | Les 7 jours sont passés : réinstallez-la avec Sideloadly. |

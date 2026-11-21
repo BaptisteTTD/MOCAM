@@ -19,6 +19,16 @@ from .paths import ROOT
 
 
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] == "blender":
+        # moteur Blender (module bpy intégré) : mocapcam blender -- <arguments de blender_script>
+        rest = argv[1:]
+        if rest and rest[0] == "--":
+            rest = rest[1:]
+        sys.argv = ["blender", "--", *rest]
+        from . import blender_script
+        blender_script.main_cli()
+        return 0
     ap = argparse.ArgumentParser(prog="mocapcam", description="Motion capture multi-téléphones")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -162,8 +172,27 @@ def diagnostic():
             det.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=np.zeros((256, 256, 3), np.uint8)))
         return "modèle chargé"
     step("détection du visage (MediaPipe)", visage)
-    b = fbx.find_blender()
-    print(f"[{'OK' if b else 'MANQUE'}] Blender : {b or 'introuvable (installez-le depuis blender.org)'}")
+    if fbx.bundled_blender():
+        def blender():
+            import shutil
+            import tempfile
+            d = tempfile.mkdtemp(prefix="mocam_diag_")
+            src = os.path.join(d, "diagnostic.mocap.json")
+            shutil.copy(os.path.join(os.path.dirname(os.path.abspath(__file__)), "donnees", "diagnostic.mocap.json"), src)
+            out = os.path.join(d, "diagnostic.fbx")
+            if not fbx.export(src, out, log=print) or not os.path.exists(out):
+                raise RuntimeError("FBX non créé")
+            # retarget (import FBX, transfert, export FBX + aperçu glTF), comme pour un personnage
+            anim, glb = os.path.join(d, "anime.fbx"), os.path.join(d, "anime.glb")
+            rep = fbx.retarget(out, out, anim, glb_path=glb, log=print)
+            if not rep or not os.path.exists(anim) or not os.path.exists(glb):
+                raise RuntimeError("retarget impossible")
+            return (f"intégré : FBX ({os.path.getsize(out) // 1024} ko), retarget ({rep.get('animated')} os) "
+                    f"et aperçu glTF ({os.path.getsize(glb) // 1024} ko)")
+        step("Blender", blender)
+    else:
+        b = fbx.find_blender()
+        print(f"[{'OK' if b else 'MANQUE'}] Blender : {b or 'introuvable (installez-le depuis blender.org)'}")
     return 1 if bad else 0
 
 

@@ -3,9 +3,8 @@ MOCAM Studio pour Windows
 
 1. Décompressez ce dossier où vous voulez (par exemple dans Documents\MOCAM).
    Vos prises, vos visages et vos personnages seront enregistrés dans ce même dossier.
-2. Installez Blender (gratuit) depuis https://www.blender.org : MOCAM s'en sert pour créer
-   les FBX et animer vos personnages. Il est trouvé tout seul.
-3. Double-cliquez sur « MOCAM Studio.exe ». Laissez sa fenêtre noire ouverte : c'est le Studio.
+   Rien d'autre à installer : Python et Blender (pour créer les FBX) sont compris.
+2. Double-cliquez sur « MOCAM Studio.exe ». Laissez sa fenêtre noire ouverte : c'est le Studio.
    Un raccourci « MOCAM Studio » est créé sur le Bureau au premier lancement.
 
 Au premier traitement, MOCAM télécharge ses modèles de détection (une seule fois, connexion

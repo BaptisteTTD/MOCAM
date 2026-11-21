@@ -36,7 +36,7 @@ from .paths import FROZEN, ROOT, self_command
 
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "studio_ui")
 # version du serveur : l'interface (index.html) vérifie qu'elle parle au serveur de la même version
-STUDIO_VERSION = "1.8.0"
+STUDIO_VERSION = "1.9.0"
 
 # horloge du PC en ms (monotone, calée sur l'heure système au démarrage)
 _EPOCH = time.time() * 1000 - time.monotonic() * 1000
@@ -262,7 +262,7 @@ class Studio:
         self.net = dict(hosts=lan_addresses(), ssid=None, public=False, firewall_rule=None, adapters=[])
         self.queue = []             # traitements en attente
         self.char_busy = None       # import de personnage en cours
-        self.has_blender = bool(fbx.find_blender(self.cfg().get("blender") or None))
+        self.has_blender = bool(fbx.engine(self.cfg().get("blender") or None))
 
     def _fov_path(self):
         return os.path.join(self.studio_dir, "objectifs.json")
@@ -312,7 +312,7 @@ class Studio:
         while True:
             try:
                 info = await loop.run_in_executor(None, network_info, self.port)
-                hb = bool(fbx.find_blender(self.cfg().get("blender") or None))
+                hb = bool(fbx.engine(self.cfg().get("blender") or None))
                 if info != self.net or hb != self.has_blender:
                     self.net, self.has_blender = info, hb
                     self.changed()
