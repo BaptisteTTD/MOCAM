@@ -15,9 +15,6 @@ mobile/MocapCamPhone/node_modules/
 mobile/MocapCamPhone/android/
 mobile/MocapCamPhone/ios/
 mobile/MocapCamPhone/.expo/
-3dsmax/test/resultat.txt
-3dsmax/test/listener.log
-3dsmax/test/*.max
 
 # Personnages fournis (ex. Y Bot de Mixamo) : fichiers locaux, non redistribuables tels quels
 personnages_fournis/*

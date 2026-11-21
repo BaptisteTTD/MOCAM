@@ -1,7 +1,6 @@
 """Test de la ligne de commande sur de vrais fichiers vidéo (avec son),
 sans les modèles de détection : les résultats 2D de synthèse sont placés dans le cache."""
 import os
-import shutil
 import subprocess
 import sys
 import tempfile

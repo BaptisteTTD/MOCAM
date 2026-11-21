@@ -14,11 +14,6 @@ if not exist .venv (
 )
 .venv\Scripts\python.exe -m pip install --upgrade pip
 .venv\Scripts\python.exe -m pip install -r requirements.txt
-rem recette de compilation de l'app pour GitHub (dossier .github\workflows)
-if not exist .github\workflows\app-mobile.yml (
-  mkdir .github\workflows 2>nul
-  copy /y mobile\workflow-github-app-mobile.yml .github\workflows\app-mobile.yml >nul
-)
 if not exist studio\studio.json (
   .venv\Scripts\python.exe -m mocapcam init studio
 )

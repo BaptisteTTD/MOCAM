@@ -66,10 +66,10 @@ def main():
             __import__("shutil").copy(video, fd)
     else:
         Wsrc, names = fake_take(fd)
-        face.write_meta(fd, tete=True, miroir=True)     # anciens réglages : ignorés désormais
+        face.write_meta(fd, tete=True, miroir=True, rotation=0)   # anciens réglages : ignorés
     import bpy  # noqa: F401  (Blender en module)
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "blender_addon"))
-    import mocapcam_blender as mb
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mocapcam"))
+    import blender_script as mb
     from mocapcam import fbx as fbxmod
     # Blender en module plutôt qu'en sous-processus
     fbxmod.face_export = lambda j, f, g=None, blender=None, log=print: mb.face_file(j, f, g)

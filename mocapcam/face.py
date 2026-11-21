@@ -405,7 +405,6 @@ LIDS = {
                  up2=[467, 260, 259, 257, 258, 286, 414], lo2=[255, 339, 254, 253, 252, 256, 341],
                  crease=[342, 445, 444, 443, 442, 441, 413]),
 }
-EYE_GEOM = ("eyeBlink", "eyeWide", "eyeSquint", "eyeLook")
 
 
 def eye_shapes(neutral, miroir=False):

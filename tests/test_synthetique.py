@@ -18,7 +18,7 @@ import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-sys.path.insert(0, os.path.join(ROOT, "blender_addon"))
+sys.path.insert(0, os.path.join(ROOT, "mocapcam"))
 
 from mocapcam import intrinsics, markers as mk, sync, triangulate, pipeline  # noqa: E402
 from mocapcam.skeleton import JOINT_NAMES, INDEX, HAND_IDX, BODY_IDX, SWAP_LR  # noqa: E402
@@ -213,8 +213,8 @@ def reset_blender():
 
 def make_ground_truth(T=300, fps=60):
     bpy = reset_blender()
-    import mocapcam_blender as mb
-    from mathutils import Euler, Quaternion
+    import blender_script as mb
+    from mathutils import Euler
     empty = {n: np.full((10, 3), np.nan) for n in JOINT_NAMES}
     arm = mb.create_mixamo_armature(bpy.context, empty, name="GT")
     arm.location = (1.25, 1.4, 0.0)
@@ -419,7 +419,7 @@ def test_sync_motion(X_gt):
 def test_fbx(path):
     """Capture -> FBX (squelette Mixamo animé) -> réimport : mêmes positions, mêmes noms d'os."""
     import bpy
-    import mocapcam_blender as mb
+    import blender_script as mb
     dst = os.path.join(OUT, "test_mixamo.fbx")
     rep = mb.capture_to_fbx(path, dst)
     arm = bpy.data.objects["Armature"]
@@ -457,51 +457,6 @@ def test_fbx(path):
        f"{os.path.getsize(dst) / 1e6:.1f} Mo")
 
 
-def test_rig_preview(path):
-    """Rig Mixamo par défaut : le FBX reste sans maillage, l'aperçu GLB porte le mannequin skinné."""
-    import bpy
-    from mathutils import Vector
-    import mocapcam_blender as mb
-    dst = os.path.join(OUT, "test_rig.fbx")
-    glb = os.path.join(OUT, "test_rig.glb")
-    rep = mb.capture_to_fbx(path, dst, glb_path=glb)
-    bpy.ops.wm.read_factory_settings(use_empty=True)
-    bpy.ops.import_scene.fbx(filepath=dst)
-    fbx_meshes = [o for o in bpy.data.objects if o.type == "MESH"]
-    bpy.ops.wm.read_factory_settings(use_empty=True)
-    bpy.ops.import_scene.gltf(filepath=glb)
-    arm = [o for o in bpy.data.objects if o.type == "ARMATURE"][0]
-    # (l'import glTF ajoute une petite sphère pour dessiner les os : on prend le maillage skinné)
-    meshes = [o for o in bpy.data.objects if o.type == "MESH" and any(m.type == "ARMATURE" for m in o.modifiers)]
-    me = meshes[0] if meshes else None
-    skinned = me is not None and any(m.type == "ARMATURE" and m.object == arm for m in me.modifiers)
-    act = arm.animation_data.action if arm.animation_data else None
-    # le maillage suit le rig : la tête du mannequin reste autour de l'os de la tête
-    err = 9.0
-    if skinned and act:
-        sc = bpy.context.scene
-        f = int((act.frame_range[0] + act.frame_range[1]) / 2)
-        sc.frame_set(f)
-        dg = bpy.context.evaluated_depsgraph_get()
-        ev = me.evaluated_get(dg).to_mesh()
-        hb = next(b for b in arm.pose.bones if b.name.endswith("Head"))
-        vg = me.vertex_groups[hb.name].index
-        pts = [me.matrix_world @ v.co for v, v0 in zip(ev.vertices, me.data.vertices)
-               if any(g.group == vg for g in v0.groups)]
-        c = sum(pts, Vector()) / len(pts)
-        head = arm.matrix_world @ ((hb.head + hb.tail) / 2)
-        err = (c - head).length
-        me.evaluated_get(dg).to_mesh_clear()
-    # l'import glTF convertit le temps à la cadence de la scène : on compare des durées
-    dur = (act.frame_range[1] - act.frame_range[0]) / bpy.context.scene.render.fps if act else 0
-    dur_ref = (rep["frames"] - 1) / rep["fps"]
-    ok("rig Mixamo par défaut (aperçu avec mannequin)",
-       not fbx_meshes and skinned and len(arm.data.bones) >= 60 and abs(dur - dur_ref) < 0.05 and err < 0.15,
-       f"FBX sans maillage, GLB : mannequin de {len(me.data.vertices) if me else 0} sommets, "
-       f"{dur:.2f} s animées (capture {dur_ref:.2f} s), tête du mannequin à {err * 100:.1f} cm de l'os, "
-       f"{os.path.getsize(glb) / 1e6:.1f} Mo")
-
-
 def test_default_character():
     """Personnage fourni (Y Bot) : déjà importé à la main -> marqué fourni et pris par défaut ;
     un personnage choisi dans Studio reste prioritaire ; un nom inconnu retombe sur Y Bot."""
@@ -535,7 +490,7 @@ def test_transfer(path):
     échelle 0,01, tourné de 90°, plus petit (comme un perso téléchargé sur Mixamo)."""
     import bpy
     import mathutils
-    import mocapcam_blender as mb
+    import blender_script as mb
     src_fbx = os.path.join(OUT, "transfert_source.fbx")
     mb.capture_to_fbx(path, src_fbx)
     bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -630,7 +585,7 @@ def test_rigs(path):
     + aperçu GLB, comme MOCAM Studio le fait sans interface."""
     import bpy
     import mathutils
-    import mocapcam_blender as mb
+    import blender_script as mb
     src_fbx = os.path.join(OUT, "rigs_source.fbx")
     mb.capture_to_fbx(path, src_fbx)
     _, J = mb.load_motion(path)
@@ -713,7 +668,7 @@ def test_imported_rigs(path):
       proches (f_index.01_master), os déformants hors de la chaîne (DEF-pelvis)."""
     import bpy
     import mathutils
-    import mocapcam_blender as mb
+    import blender_script as mb
     src_fbx = os.path.join(OUT, "rigs_source.fbx")
     if not os.path.exists(src_fbx):
         mb.capture_to_fbx(path, src_fbx)
@@ -850,7 +805,7 @@ def test_height(path):
     exporté, et une prise traitée se remet à la taille indiquée sans retraitement."""
     import shutil
     import bpy
-    import mocapcam_blender as mb
+    import blender_script as mb
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     X = pipeline._load_positions(data)
@@ -1005,26 +960,22 @@ def test_blender(path, X_gt):
     import mathutils
     bpy = reset_blender()
     import importlib
-    import mocapcam_blender as mb
+    import blender_script as mb
     importlib.reload(mb)
-    mb.register()
     d, J = mb.load_motion(path)
     T = d["frame_count"]
-    # (a) le FBX produit par le traitement, importé avec l'opérateur de l'add-on
+    # (a) le FBX produit par le traitement, réimporté
     fbx_path = os.path.join(OUT, "prise_test.fbx")
     mb.capture_to_fbx(path, fbx_path)
     bpy.ops.wm.read_factory_settings(use_empty=True)
-    res = bpy.ops.mocapcam.import_fbx(filepath=fbx_path)
-    gen = bpy.context.scene.mocapcam_source
-    assert res == {"FINISHED"} and gen is not None and gen.name == "prise_test"
-    # (b) personnage en A-pose : retarget avec l'opérateur. Importer un personnage Mixamo
-    # (FBX à 30 i/s) passe la scène à 30 i/s : le retarget doit la remettre à la cadence de
-    # la capture, sinon l'animation est jouée au ralenti.
+    gen = mb.import_animation(bpy.context, fbx_path)
+    assert gen is not None and gen.name == "prise_test"
+    # (b) personnage en A-pose. Une scène à 30 i/s (personnage Mixamo importé) doit être
+    # remise à la cadence de la capture, sinon l'animation est jouée au ralenti.
     apose = mb.create_mixamo_armature(bpy.context, J, name="Apose", pose="A")
     apose.location = (4, 0, 0)
-    bpy.context.scene.mocapcam_target = apose
     bpy.context.scene.render.fps = 30
-    assert bpy.ops.mocapcam.retarget(hide_source=False) == {"FINISHED"}
+    mb.transfer_motion(bpy.context, gen, apose)
     fps_ok = mb.scene_fps(bpy.context.scene) == d["fps"] and mb.anim_fps(apose) == d["fps"]
     # la cadence voyage dans le FBX : un import FBX standard la retrouve
     before = set(bpy.data.objects)
@@ -1038,8 +989,7 @@ def test_blender(path, X_gt):
     M = mathutils.Matrix.Translation((-3, 0, 0)) @ mathutils.Matrix.Rotation(math.radians(90), 4, "X") @ mathutils.Matrix.Scale(0.01, 4)
     Jbig = {k: v * 1.15 for k, v in J.items()}
     fbx = mb.create_mixamo_armature(bpy.context, Jbig, name="FBXlike", obj_matrix=M)
-    bpy.context.scene.mocapcam_target = fbx
-    assert bpy.ops.mocapcam.retarget(hide_source=False) == {"FINISHED"}
+    mb.transfer_motion(bpy.context, gen, fbx)
 
     check = ["l_wrist", "r_wrist", "l_ankle", "r_ankle", "l_elbow", "r_knee", "nose",
              "lh_8", "lh_4", "rh_12", "rh_20", "l_big_toe"]
@@ -1074,7 +1024,7 @@ def test_blender(path, X_gt):
                     pos_err.append(np.linalg.norm((Jp[n] - hip_p) - rel_g[INDEX[n]]))
         fb, ff = np.array(fid["corps"]), np.array(fid["doigts"])
         tb, tf = np.array(tot["corps"]), np.array(tot["doigts"])
-        msg = (f"fidélité add-on : corps {np.median(fb):.2f}° (95 % < {np.percentile(fb, 95):.1f}°), "
+        msg = (f"fidélité Blender : corps {np.median(fb):.2f}° (95 % < {np.percentile(fb, 95):.1f}°), "
                f"doigts {np.median(ff):.2f}° | bilan vs réel : corps {np.median(tb):.1f}°, "
                f"doigts {np.median(tf):.1f}° (95 % < {np.percentile(tf, 95):.0f}°)")
         if pos_err:
@@ -1102,7 +1052,6 @@ if __name__ == "__main__":
     test_blender(path, X_gt)
     test_height(path)
     test_fbx(path)
-    test_rig_preview(path)
     test_default_character()
     test_transfer(path)
     test_rigs(path)

@@ -11,8 +11,7 @@ import shutil
 import subprocess
 import sys
 
-ADDON = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                     "blender_addon", "mocapcam_blender.py")
+SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "blender_script.py")
 
 
 def _version_key(path):
@@ -50,10 +49,9 @@ def find_blender(configured=None):
     return None
 
 
-def export(mocap_json, fbx_path=None, blender=None, root_mode="RELATIVE", log=print, timeout=900,
-           glb_path=None):
+def export(mocap_json, fbx_path=None, blender=None, root_mode="RELATIVE", log=print, timeout=900):
     """Crée <prise>.fbx à côté de la capture (rig Mixamo animé, sans maillage).
-    glb_path : aperçu 3D pour Studio (même rig, avec le mannequin). Retourne le chemin, ou None."""
+    Retourne le chemin, ou None."""
     exe = find_blender(blender)
     if not exe:
         log("  FBX non créé : Blender introuvable. Indiquez son chemin dans studio.json "
@@ -64,10 +62,8 @@ def export(mocap_json, fbx_path=None, blender=None, root_mode="RELATIVE", log=pr
         if os.path.basename(d) == "mocapcam":            # données de travail -> FBX dans la prise
             d = os.path.dirname(d)
         fbx_path = os.path.join(d, re.sub(r"(\.mocap)?\.json$", "", f) + ".fbx")
-    cmd = [exe, "-b", "--factory-startup", "--python-exit-code", "1", "--python", ADDON,
+    cmd = [exe, "-b", "--factory-startup", "--python-exit-code", "1", "--python", SCRIPT,
            "--", os.path.abspath(mocap_json), os.path.abspath(fbx_path), root_mode]
-    if glb_path:
-        cmd.append(os.path.abspath(glb_path))
     try:
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -93,7 +89,7 @@ def _run_blender(args, marker, blender=None, log=print, timeout=1800):
         log("  Blender introuvable : installez Blender (gratuit) ou indiquez son chemin dans studio.json "
             '(clé "blender").')
         return None
-    cmd = [exe, "-b", "--factory-startup", "--python-exit-code", "1", "--python", ADDON, "--", *args]
+    cmd = [exe, "-b", "--factory-startup", "--python-exit-code", "1", "--python", SCRIPT, "--", *args]
     try:
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -128,12 +124,6 @@ def retarget(anim_fbx, character, out_fbx, glb_path=None, root_mode="RELATIVE", 
     return rep
 
 
-def rig_preview(mocap_json, glb_path, blender=None, log=print):
-    """Aperçu 3D d'une prise déjà traitée : rig Mixamo animé avec le mannequin (GLB)."""
-    return _run_blender(["rig", os.path.abspath(mocap_json), os.path.abspath(glb_path)],
-                        "MOCAPCAM_RIG_OK", blender, log, timeout=900)
-
-
 def face_export(face_json, fbx_path, glb_path=None, blender=None, log=print):
     """Visage MOCAM animé (52 blendshapes ARKit + os de tête) : FBX (+ GLB d'aperçu)."""
     args = ["face", os.path.abspath(face_json), os.path.abspath(fbx_path)]
@@ -143,11 +133,3 @@ def face_export(face_json, fbx_path, glb_path=None, blender=None, log=print):
     if rep:
         log(f"    FBX : {fbx_path} ({rep['shapes']} blendshapes, {rep['frames']} images)")
     return rep
-
-
-def face_character(face_json, character, out_fbx, glb_path=None, blender=None, log=print):
-    """Courbes de visage appliquées aux blendshapes ARKit d'un personnage : FBX (+ GLB)."""
-    args = ["face_character", os.path.abspath(face_json), os.path.abspath(character), os.path.abspath(out_fbx)]
-    if glb_path:
-        args.append(os.path.abspath(glb_path))
-    return _run_blender(args, "MOCAPCAM_FACECHAR_OK", blender, log, timeout=1200)

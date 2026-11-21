@@ -11,13 +11,12 @@ Vous filmez un acteur avec deux téléphones ou plus, posés sur trépied. MOCAM
 complète (corps, mains et doigts) et la livre en **FBX**, prête pour Blender, Unity, Unreal ou
 3ds Max.
 
-MOCAM, c'est trois choses :
+MOCAM, c'est deux choses :
 
 | | |
 |---|---|
 | **L'app MOCAM** (iPhone et Android) | Transforme chaque téléphone en caméra pilotée par le PC. |
 | **MOCAM Studio** (PC Windows) | Connecte les téléphones, lance l'enregistrement, traite les prises et montre le résultat en 3D sur votre personnage. Capture aussi le visage (52 blendshapes ARKit) avec une seule caméra. |
-| **L'add-on Blender** et **le script 3ds Max** | Transfèrent l'animation sur vos propres personnages, dans vos logiciels. |
 
 Ce que vous obtenez pour chaque prise :
 * `prise_XXX_ybot.fbx` : l'animation sur **Y Bot** (ou sur votre personnage), maillage compris ;
@@ -73,11 +72,6 @@ puis téléchargez en bas de page, rubrique **Artifacts** :
 
   Avec un Apple ID gratuit, l'app doit être réinstallée **tous les 7 jours** (même fichier,
   même étape 3). Rien n'est perdu.
-
-### Dans Blender (facultatif)
-
-*Édition > Préférences > Modules complémentaires > ▾ > Installer depuis le disque*, choisissez
-`blender_addon\mocapcam_blender.py`, puis cochez **MOCAM**.
 
 ## 3. Préparer la pièce
 
@@ -317,26 +311,12 @@ qui accepte les animations Mixamo sait l'utiliser.
   tout seuls ; l'animation s'applique ensuite à n'importe quel humanoïde.
 * **Unreal** : importez le FBX, puis reciblez avec l'IK Retargeter (préréglage Mixamo).
 
-### Blender, avec l'add-on MOCAM
+### Blender
 
-Barre latérale (touche **N**) > onglet **MOCAM** :
-
-1. **Importer une animation (.fbx)** : choisissez `prise_XXX.fbx`. La cadence et la plage
-   d'images de la scène sont réglées toutes seules.
-2. Choisissez la **Cible** (l'armature de votre personnage), puis **Retarget**. Préfixes
-   Mixamo, échelle, T-pose ou A-pose : tout est géré.
-3. **Exporter en FBX** pour récupérer le personnage animé.
-
-Si la scène passe à 30 images/s (cela arrive en important un personnage Mixamo), l'animation
-paraît au ralenti : le panneau l'affiche en rouge, avec un bouton pour corriger.
-
-### 3ds Max, sur un Biped
-
-1. Importez `prise_XXX.fbx` dans 3ds Max, avec votre Biped dans la scène.
-2. Glissez `3dsmax\MocapCam_Biped.ms` dans une fenêtre 3ds Max.
-3. Choisissez un os du squelette Mixamo, puis le Biped, et cliquez **Transférer l'animation**.
-
-Le Biped garde sa morphologie ; effacez ses pas avant le transfert.
+*Fichier > Importer > FBX* : `prise_XXX_ybot.fbx` (ou votre personnage) arrive animé, prêt à
+l'emploi. Pour animer un autre personnage, ajoutez-le dans l'onglet **Personnages** de
+MOCAM Studio (Mixamo, Unreal, Character Creator, Biped, DAZ, VRoid, Rigify…) : le transfert
+est fait pour vous.
 
 ---
 

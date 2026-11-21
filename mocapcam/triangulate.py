@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from scipy.signal import butter, filtfilt
 
-from .skeleton import CORE_IDX, SWAP_LR, HAND_IDX, FACE_IDX, BODY_IDX, INDEX, LHAND_IDX, RHAND_IDX
+from .skeleton import CORE_IDX, SWAP_LR, HAND_IDX, FACE_IDX, INDEX, LHAND_IDX, RHAND_IDX
 
 
 def undistort_normalized(pts, K, dist):

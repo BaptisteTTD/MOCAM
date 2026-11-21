@@ -1372,7 +1372,7 @@ class Studio:
                 return
             await self.enqueue("animer", m.get("take"), [cid], label=f"Animation de {ch.get('name', cid)}")
         elif a == "firewall":
-            ok = await asyncio.get_running_loop().run_in_executor(None, allow_firewall, self.port)
+            await asyncio.get_running_loop().run_in_executor(None, allow_firewall, self.port)
             self.net = await asyncio.get_running_loop().run_in_executor(None, network_info, self.port)
             await self.toast("Pare-feu : MOCAM autorisé sur tous les réseaux" if self.net.get("firewall_rule")
                              else "Pare-feu non modifié (accord administrateur refusé ?)",

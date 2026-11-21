@@ -1,13 +1,9 @@
-bl_info = {
-    "name": "MOCAM",
-    "author": "MOCAM",
-    "version": (0, 6, 0),
-    "blender": (3, 6, 0),
-    "location": "Vue 3D > barre latérale (N) > MOCAM  |  Fichier > Importer > Animation MOCAM (.fbx)",
-    "description": "Importe une animation MOCAM (FBX, squelette Mixamo) et la transfère (retarget) "
-                   "sur un personnage riggé (Mixamo, Unreal, Character Creator, Biped, DAZ, VRoid, Rigify)",
-    "category": "Animation",
-}
+"""Moteur Blender de MOCAM Studio (lancé sans interface : blender -b --python blender_script.py -- …).
+
+Construit le squelette Mixamo animé à partir d'une capture, transfère l'animation sur un
+personnage riggé (Mixamo, Unreal, Character Creator, Biped, DAZ, VRoid, Rigify), inspecte un
+personnage et exporte le visage animé (52 blendshapes ARKit). Ce n'est pas un add-on.
+"""
 
 """
 Principe de l'application sur un squelette :
@@ -24,8 +20,6 @@ import os
 
 import bpy
 import numpy as np
-from bpy.props import BoolProperty, EnumProperty, PointerProperty, StringProperty
-from bpy_extras.io_utils import ExportHelper, ImportHelper
 from mathutils import Matrix, Vector
 
 PREFIX = "mixamorig:"
@@ -1251,10 +1245,8 @@ def export_fbx(context, obj, filepath, rest_frame=True, meshes=()):
     return filepath
 
 
-def capture_to_fbx(src, dst, root_mode="RELATIVE", glb_path=None):
-    """Sans interface (blender -b) : capture .mocap.json -> FBX d'un squelette Mixamo animé.
-    glb_path : aperçu 3D pour MOCAM Studio (rig Mixamo animé avec le mannequin par défaut).
-    dst vide : seulement l'aperçu."""
+def capture_to_fbx(src, dst, root_mode="RELATIVE"):
+    """Sans interface (blender -b) : capture .mocap.json -> FBX d'un squelette Mixamo animé."""
     bpy.ops.wm.read_factory_settings(use_empty=True)
     context = bpy.context
     d, J = load_motion(src)
@@ -1265,17 +1257,12 @@ def capture_to_fbx(src, dst, root_mode="RELATIVE", glb_path=None):
     arm = create_mixamo_armature(context, J, name="Armature")   # même nom que chez Mixamo
     arm[FPS_PROP] = float(d["fps"])
     rep = apply_motion(arm, J, d["fps"], 0, root_mode, action_name=take)
-    if dst:
-        export_fbx(context, arm, dst)
-    if glb_path:
-        ob = build_mannequin(arm)
-        export_glb(context, [arm, ob], glb_path, animated=True)
-        rep["glb"] = glb_path
+    export_fbx(context, arm, dst)
     rep.update(frames=int(d["frame_count"]), fps=float(d["fps"]), bones=len(arm.data.bones))
     return rep
 
 
-# --------------------------------------------------------------------------- personnage (sans interface)
+# --------------------------------------------------------------------------- personnage
 
 CHARACTER_EXT = (".fbx", ".glb", ".gltf", ".blend")
 
@@ -1352,257 +1339,6 @@ def export_glb(context, objs, filepath, animated=True):
     except (TypeError, RuntimeError):
         bpy.ops.export_scene.gltf(**kw)
     return filepath
-
-
-# --------------------------------------------------------------------------- mannequin du rig Mixamo
-# Corps simple (segments rigides, articulations en bleu) posé sur le rig Mixamo de MOCAM :
-# c'est le « personnage » par défaut, quand aucun personnage riggé n'est importé.
-
-MANNEQUIN_NAME = "MocapCam_Mannequin"
-BODY_RGBA = (0.60, 0.63, 0.68, 1.0)
-JOINT_RGBA = (0.31, 0.50, 0.96, 1.0)
-
-
-def _basis(d, side=None):
-    d = d / max(1e-9, np.linalg.norm(d))
-    if side is None or abs(float(np.dot(nrm(side), d))) > 0.95:
-        side = np.array([1.0, 0, 0]) if abs(d[0]) < 0.9 else np.array([0, 1.0, 0])
-    x = side - np.dot(side, d) * d
-    x = x / np.linalg.norm(x)
-    return x, np.cross(d, x), d
-
-
-class _Pieces:
-    """Accumule des volumes fermés, chacun rattaché à un os (poids 1)."""
-
-    def __init__(self):
-        self.v, self.f, self.mat, self.smooth, self.groups = [], [], [], [], {}
-
-    def _add(self, verts, faces, bone, mat, smooth):
-        base = len(self.v)
-        self.v += [tuple(map(float, p)) for p in verts]
-        self.f += [tuple(base + i for i in fc) for fc in faces]
-        self.mat += [mat] * len(faces)
-        self.smooth += smooth if isinstance(smooth, list) else [smooth] * len(faces)
-        self.groups.setdefault(bone, []).extend(range(base, base + len(verts)))
-
-    def tube(self, a, b, r1, r2, bone, side=None, flat=1.0, n=16, mat=0):
-        """Cylindre (section elliptique : r le long de `side`, r × flat dans l'autre sens)."""
-        a, b = np.asarray(a, float), np.asarray(b, float)
-        if np.linalg.norm(b - a) < 1e-6:
-            return
-        x, y, _ = _basis(b - a, side)
-        ang = np.linspace(0, 2 * np.pi, n, endpoint=False)
-        ring = lambda c, r: [c + r * math.cos(t) * x + r * flat * math.sin(t) * y for t in ang]
-        verts = ring(a, r1) + ring(b, r2) + [a, b]
-        faces, smooth = [], []
-        for i in range(n):
-            j = (i + 1) % n
-            faces += [(i, j, n + j, n + i), (2 * n, j, i), (2 * n + 1, n + i, n + j)]
-            smooth += [True, False, False]
-        self._add(verts, faces, bone, mat, smooth)
-
-    def loft(self, rings, n=24, mat=0):
-        """Volume continu : anneaux elliptiques horizontaux [(centre, rx, ry, os)], fermé aux bouts.
-        Chaque anneau suit son os : le volume s'étire entre deux os au lieu de se séparer."""
-        X, Y = np.array([1.0, 0, 0]), np.array([0, 1.0, 0])
-        ang = np.linspace(0, 2 * np.pi, n, endpoint=False)
-        base = len(self.v)
-        for c, rx, ry, bone in rings:
-            self._add([c + rx * math.cos(t) * X + ry * math.sin(t) * Y for t in ang], [], bone, mat, True)
-        self._add([rings[0][0], rings[-1][0]], [], rings[0][3], mat, True)
-        self.groups[rings[0][3]].pop()
-        self.groups.setdefault(rings[-1][3], []).append(base + len(rings) * n + 1)
-        bot, top = base + len(rings) * n, base + len(rings) * n + 1
-        faces, smooth = [], []
-        for k in range(len(rings) - 1):
-            r0, r1 = base + k * n, base + (k + 1) * n
-            for i in range(n):
-                j = (i + 1) % n
-                faces.append((r0 + i, r0 + j, r1 + j, r1 + i))
-        last = base + (len(rings) - 1) * n
-        for i in range(n):
-            j = (i + 1) % n
-            faces += [(bot, base + j, base + i), (top, last + i, last + j)]
-        self.f += faces
-        self.mat += [mat] * len(faces)
-        self.smooth += [True] * len(faces)
-
-    def ellipsoid(self, c, radii, bone, axes=None, n=18, m=10, mat=0):
-        c = np.asarray(c, float)
-        ex, ey, ez = axes if axes is not None else np.eye(3)
-        verts = [c - radii[2] * ez]
-        for k in range(1, m):
-            phi = -math.pi / 2 + math.pi * k / m
-            for i in range(n):
-                t = 2 * math.pi * i / n
-                verts.append(c + radii[0] * math.cos(phi) * math.cos(t) * ex
-                             + radii[1] * math.cos(phi) * math.sin(t) * ey + radii[2] * math.sin(phi) * ez)
-        verts.append(c + radii[2] * ez)
-        top = len(verts) - 1
-        faces = [(0, 1 + (i + 1) % n, 1 + i) for i in range(n)]
-        for k in range(m - 2):
-            r0, r1 = 1 + k * n, 1 + (k + 1) * n
-            faces += [(r0 + i, r0 + (i + 1) % n, r1 + (i + 1) % n, r1 + i) for i in range(n)]
-        last = 1 + (m - 2) * n
-        faces += [(last + i, last + (i + 1) % n, top) for i in range(n)]
-        self._add(verts, faces, bone, mat, True)
-
-    def sphere(self, c, r, bone, mat=1):
-        self.ellipsoid(c, (r, r, r), bone, n=14, m=8, mat=mat)
-
-
-def _mannequin_material(name, rgba):
-    mat = bpy.data.materials.get(name) or bpy.data.materials.new(name)
-    mat.diffuse_color = rgba
-    mat.use_nodes = True
-    bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
-    if bsdf:
-        bsdf.inputs["Base Color"].default_value = rgba
-        bsdf.inputs["Roughness"].default_value = 0.55
-    return mat
-
-
-def build_mannequin(arm, name=MANNEQUIN_NAME):
-    """Maillage de mannequin skinné sur un rig aux noms Mixamo (celui de MOCAM).
-    Renvoie l'objet maillage (enfant de l'armature, modificateur Armature)."""
-    bones = arm.data.bones
-
-    def B(n):
-        b = bones.get(PREFIX + n) or bones.get(n)
-        return b
-
-    def H(n):
-        return np.array(B(n).head_local, float)
-
-    def T(n):
-        return np.array(B(n).tail_local, float)
-
-    def has(*ns):
-        return all(B(n) is not None for n in ns)
-
-    need = ("Hips", "Spine", "Spine2", "Neck", "Head", "LeftUpLeg", "LeftLeg", "RightUpLeg", "RightLeg")
-    if not has(*need):
-        raise RuntimeError("le mannequin demande un squelette aux noms Mixamo")
-    legs = [np.linalg.norm(T(f"{s}UpLeg") - H(f"{s}UpLeg")) + np.linalg.norm(T(f"{s}Leg") - H(f"{s}Leg"))
-            for s in ("Left", "Right")]
-    s = float(np.mean(legs)) / 0.85                      # 1 pour un adulte d'environ 1,79 m
-    X, Y, Z = np.eye(3)
-    hip_w = abs(H("LeftUpLeg")[0] - H("RightUpLeg")[0])
-    sh_w = abs(T("LeftShoulder")[0] - T("RightShoulder")[0]) if has("LeftShoulder", "RightShoulder") else 0.36 * s
-    P = _Pieces()
-    bn = lambda n: B(n).name
-
-    # tronc d'un seul tenant (bassin -> épaules), tête
-    sp1 = "Spine1" if B("Spine1") else "Spine"
-    h0, top = H("Hips"), T("Spine2")
-    mid = lambda n: (H(n) + T(n)) / 2
-    hw = hip_w / 2
-    shw = max(0.15 * s, sh_w / 2 - 0.005 * s)
-    fw = -Y * 0.008 * s                                   # poitrine un peu en avant
-    rings = [(h0 - Z * 0.105 * s, hw + 0.01 * s, 0.075 * s, "Hips"),
-             (h0 - Z * 0.06 * s, hw + 0.06 * s, 0.098 * s, "Hips"),
-             (h0 + Z * 0.0, hw + 0.075 * s, 0.105 * s, "Hips"),
-             (T("Hips") + Z * 0.01 * s, hw + 0.06 * s, 0.1 * s, "Hips"),
-             (mid("Spine"), 0.132 * s, 0.093 * s, "Spine"),
-             (H(sp1), 0.138 * s, 0.096 * s, sp1),
-             (mid(sp1) + fw, 0.148 * s, 0.104 * s, sp1),
-             (H("Spine2") + fw, 0.158 * s, 0.11 * s, "Spine2"),
-             (mid("Spine2") + fw, 0.5 * (0.158 * s + shw), 0.112 * s, "Spine2"),
-             (top - Z * 0.025 * s + fw * 0.5, shw, 0.1 * s, "Spine2"),
-             (top + Z * 0.01 * s, shw * 0.8, 0.082 * s, "Spine2"),
-             (top + Z * 0.035 * s, 0.07 * s, 0.058 * s, "Spine2")]
-    P.loft([(c, rx, ry, bn(b)) for c, rx, ry, b in rings])
-    P.tube(H("Neck"), T("Neck") + Z * 0.02 * s, 0.05 * s, 0.046 * s, bn("Neck"))
-    P.ellipsoid(H("Head") + Z * 0.1 * s - Y * 0.012 * s, (0.082 * s, 0.098 * s, 0.115 * s), bn("Head"))
-
-    for side in ("Left", "Right"):
-        # bras
-        if has(f"{side}Shoulder"):
-            P.tube(H(f"{side}Shoulder"), T(f"{side}Shoulder"), 0.05 * s, 0.056 * s, bn(f"{side}Shoulder"), side=Y)
-        if has(f"{side}Arm", f"{side}ForeArm"):
-            P.sphere(H(f"{side}Arm"), 0.064 * s, bn(f"{side}Arm"))
-            P.tube(H(f"{side}Arm"), T(f"{side}Arm"), 0.052 * s, 0.041 * s, bn(f"{side}Arm"))
-            P.sphere(H(f"{side}ForeArm"), 0.047 * s, bn(f"{side}ForeArm"))
-            P.tube(H(f"{side}ForeArm"), T(f"{side}ForeArm"), 0.04 * s, 0.03 * s, bn(f"{side}ForeArm"))
-        if has(f"{side}Hand"):
-            hb = f"{side}Hand"
-            P.sphere(H(hb), 0.035 * s, bn(hb))
-            bases = [H(f"{side}Hand{f}1") for f in ("Index", "Middle", "Ring", "Pinky") if has(f"{side}Hand{f}1")]
-            tip = np.mean(bases, axis=0) if bases else T(hb)
-            width = (H(f"{side}HandIndex1") - H(f"{side}HandPinky1")) if has(f"{side}HandIndex1", f"{side}HandPinky1") else Y
-            P.tube(H(hb), tip, 0.036 * s, 0.043 * s, bn(hb), side=width, flat=0.38)
-            for f in FINGERS:
-                r = 0.0135 * s if f == "Thumb" else 0.0105 * s
-                for k in (1, 2, 3):
-                    n = f"{side}Hand{f}{k}"
-                    if not has(n):
-                        continue
-                    P.sphere(H(n), r * 1.12, bn(n))
-                    P.tube(H(n), T(n), r, r * 0.88, bn(n), n=10)
-        # jambes
-        P.tube(H(f"{side}UpLeg"), T(f"{side}UpLeg"), 0.082 * s, 0.058 * s, bn(f"{side}UpLeg"))
-        P.sphere(H(f"{side}Leg"), 0.066 * s, bn(f"{side}Leg"))
-        P.tube(H(f"{side}Leg"), T(f"{side}Leg"), 0.055 * s, 0.04 * s, bn(f"{side}Leg"))
-        if has(f"{side}Foot"):
-            fb = f"{side}Foot"
-            P.sphere(H(fb), 0.048 * s, bn(fb))
-            ball = T(fb).copy()
-            fwd = ball - H(fb)
-            fwd[2] = 0
-            fwd = nrm(fwd) if np.linalg.norm(fwd) > 1e-6 else -Y
-            heel = H(fb) - fwd * 0.05 * s
-            heel[2] = 0.036 * s
-            ball[2] = max(ball[2], 0.032 * s)
-            P.tube(heel, ball, 0.042 * s, 0.046 * s, bn(fb), side=X, flat=0.75)
-            if has(f"{side}ToeBase"):
-                toe = T(f"{side}ToeBase").copy()
-                toe[2] = max(toe[2], 0.024 * s)
-                P.tube(ball, toe, 0.044 * s, 0.034 * s, bn(f"{side}ToeBase"), side=X, flat=0.62)
-
-    me = bpy.data.meshes.new(name)
-    me.from_pydata(P.v, [], P.f)
-    me.update()
-    import bmesh
-    bm = bmesh.new()
-    bm.from_mesh(me)
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-    bm.to_mesh(me)
-    bm.free()
-    me.polygons.foreach_set("material_index", P.mat)
-    me.polygons.foreach_set("use_smooth", P.smooth)
-    me.materials.append(_mannequin_material("MocapCam_Corps", BODY_RGBA))
-    me.materials.append(_mannequin_material("MocapCam_Articulations", JOINT_RGBA))
-    me.update()
-    ob = bpy.data.objects.new(name, me)
-    for coll in arm.users_collection:
-        coll.objects.link(ob)
-    ob.parent = arm
-    ob.matrix_parent_inverse = Matrix.Identity(4)
-    ob.matrix_basis = Matrix.Identity(4)
-    for bone_name, idx in P.groups.items():
-        ob.vertex_groups.new(name=bone_name).add(idx, 1.0, "REPLACE")
-    mod = ob.modifiers.new("Armature", "ARMATURE")
-    mod.object = arm
-    return ob
-
-
-def _neutral_joints():
-    """Trajectoires vides : le rig prend les proportions par défaut (adulte d'environ 1,79 m)."""
-    names = ["nose", "l_eye", "r_eye", "l_ear", "r_ear", "l_shoulder", "r_shoulder", "l_elbow", "r_elbow",
-             "l_wrist", "r_wrist", "l_hip", "r_hip", "l_knee", "r_knee", "l_ankle", "r_ankle",
-             "l_big_toe", "l_small_toe", "l_heel", "r_big_toe", "r_small_toe", "r_heel"]
-    names += [f"{h}_{i}" for h in ("lh", "rh") for i in range(21)]
-    return {n: np.full((1, 3), np.nan) for n in names}
-
-
-def mannequin_file(glb_path):
-    """GLB du rig Mixamo par défaut avec son mannequin, en T-pose (vignette de MOCAM Studio)."""
-    bpy.ops.wm.read_factory_settings(use_empty=True)
-    arm = create_mixamo_armature(bpy.context, _neutral_joints(), name="Armature")
-    ob = build_mannequin(arm)
-    export_glb(bpy.context, [arm, ob], glb_path, animated=False)
-    return dict(vertices=len(ob.data.vertices), groups=len(ob.vertex_groups), bones=len(arm.data.bones))
 
 
 def inspect_character(path, glb_path=None):
@@ -1818,66 +1554,9 @@ def face_shapes(meshes):
     return found
 
 
-def face_character_file(json_path, char_path, out_fbx, glb_path=None):
-    """Courbes de visage -> blendshapes ARKit du personnage (+ rotation de son os de tête)."""
-    bpy.ops.wm.read_factory_settings(use_empty=True)
-    context = bpy.context
-    arm, meshes = _load_any(context, char_path)
-    found = face_shapes(meshes)
-    if not found:
-        raise RuntimeError("Ce personnage n'a pas de blendshapes ARKit (eyeBlinkLeft, jawOpen…)")
-    d, W, H = _face_curves(json_path)
-    fps = float(d["fps"])
-    sc = context.scene
-    set_scene_fps(sc, fps)
-    sc.frame_start, sc.frame_end = 0, len(W) - 1
-    take = os.path.splitext(os.path.basename(json_path))[0]
-    n = _key_face(found, W)
-    head = False
-    if arm is not None:
-        try:
-            bmap = bone_map(arm)
-        except RuntimeError:
-            bmap = {}
-        hb = bmap.get("Head") or next((b.name for b in arm.data.bones
-                                       if b.name.lower().split(":")[-1].split("_")[-1] == "head"), None)
-        if hb:
-            pb = arm.pose.bones[hb]
-            rest = arm.data.bones[hb].matrix_local.to_quaternion()
-            pb.rotation_mode = "QUATERNION"
-            for i in range(len(H)):
-                q = _head_quat(H[i])
-                pb.rotation_quaternion = rest.inverted() @ q @ rest
-                pb.keyframe_insert("rotation_quaternion", frame=i)
-            head = True
-        arm[FPS_PROP] = fps
-        if arm.animation_data and arm.animation_data.action:
-            arm.animation_data.action.name = take
-        export_fbx(context, arm, out_fbx, rest_frame=False, meshes=meshes)
-        objs = [arm] + meshes
-    else:
-        for o in context.view_layer.objects:
-            o.select_set(False)
-        for o in meshes:
-            o.select_set(True)
-        context.view_layer.objects.active = meshes[0]
-        bpy.ops.export_scene.fbx(filepath=out_fbx, use_selection=True, object_types={"MESH"},
-                                 path_mode="COPY", embed_textures=True, bake_anim=True,
-                                 bake_anim_use_nla_strips=False, bake_anim_use_all_actions=False,
-                                 bake_anim_simplify_factor=0.0, axis_forward="-Z", axis_up="Y")
-        objs = meshes
-    if glb_path:
-        os.makedirs(os.path.dirname(glb_path), exist_ok=True)
-        export_glb(context, objs, glb_path, animated=True)
-    return dict(shapes=len(found), keyed=n, meshes=len({kb.id_data for v in found.values() for kb in v}),
-                head=head, missing=[k for k in ARKIT if k not in found])
-
-
 def main_cli():
     """blender -b --factory-startup --python <ce fichier> -- …
-      capture.mocap.json sortie.fbx [RELATIVE|ABSOLUTE] [apercu.glb]   capture -> rig Mixamo animé
-      rig capture.mocap.json apercu.glb [RELATIVE|ABSOLUTE]    aperçu seul (rig + mannequin)
-      mannequin sortie.glb                                       rig Mixamo par défaut, T-pose
+      capture.mocap.json sortie.fbx [RELATIVE|ABSOLUTE]                capture -> rig Mixamo animé
       retarget anim.fbx personnage.fbx sortie.fbx [RELATIVE|ABSOLUTE] [apercu.glb]
       inspect personnage.fbx [apercu.glb]"""
     import sys
@@ -1893,34 +1572,17 @@ def main_cli():
         rep = face_file(argv[1], argv[2], argv[3] if len(argv) > 3 else None)
         print(f"MOCAPCAM_FACE_OK {json.dumps(rep)}")
         return
-    if argv and argv[0] == "face_character":
-        rep = face_character_file(argv[1], argv[2], argv[3], argv[4] if len(argv) > 4 else None)
-        print(f"MOCAPCAM_FACECHAR_OK {json.dumps(rep)}")
-        return
     if argv and argv[0] == "inspect":
         info = inspect_character(argv[1], argv[2] if len(argv) > 2 else None)
         print(f"MOCAPCAM_INSPECT_OK {json.dumps(info)}")
         return
-    if argv and argv[0] == "rig":
-        rep = capture_to_fbx(argv[1], None, argv[3] if len(argv) > 3 else "RELATIVE", glb_path=argv[2])
-        print(f"MOCAPCAM_RIG_OK {json.dumps(rep, default=str)}")
-        return
-    if argv and argv[0] == "mannequin":
-        rep = mannequin_file(argv[1])
-        print(f"MOCAPCAM_MANNEQUIN_OK {json.dumps(rep)}")
-        return
     if len(argv) < 2:
-        raise SystemExit("usage : -- capture.mocap.json sortie.fbx [RELATIVE|ABSOLUTE] [apercu.glb]")
-    rep = capture_to_fbx(argv[0], argv[1], argv[2] if len(argv) > 2 else "RELATIVE",
-                         glb_path=argv[3] if len(argv) > 3 else None)
+        raise SystemExit("usage : -- capture.mocap.json sortie.fbx [RELATIVE|ABSOLUTE]")
+    rep = capture_to_fbx(argv[0], argv[1], argv[2] if len(argv) > 2 else "RELATIVE")
     print(f"MOCAPCAM_FBX_OK {json.dumps(rep, default=str)}")
 
 
-# --------------------------------------------------------------------------- interface
-
-ROOT_ITEMS = [("RELATIVE", "Relatif", "Le personnage démarre à sa position actuelle"),
-              ("ABSOLUTE", "Absolu", "Positions de la zone de capture (origine = boule A)")]
-
+# --------------------------------------------------------------------------- import
 
 def _setup_scene(context, d, start):
     sc = context.scene
@@ -1928,10 +1590,6 @@ def _setup_scene(context, d, start):
     sc.render.fps_base = 1.0
     sc.frame_start = start
     sc.frame_end = start + d["frame_count"] - 1
-
-
-def _is_armature(self, o):
-    return o.type == "ARMATURE"
 
 
 def import_animation(context, filepath):
@@ -1960,123 +1618,6 @@ def import_animation(context, filepath):
     return arm
 
 
-class MOCAPCAM_OT_import_fbx(bpy.types.Operator, ImportHelper):
-    """Importer une animation MOCAM (.fbx, squelette Mixamo)"""
-    bl_idname = "mocapcam.import_fbx"
-    bl_label = "Importer une animation (.fbx)"
-    bl_options = {"REGISTER", "UNDO"}
-    filename_ext = ".fbx"
-    filter_glob: StringProperty(default="*.fbx", options={"HIDDEN"})
-
-    def execute(self, context):
-        try:
-            arm = import_animation(context, self.filepath)
-        except (RuntimeError, OSError) as e:
-            self.report({"ERROR"}, f"Import impossible : {e}")
-            return {"CANCELLED"}
-        sc = context.scene
-        sc.mocapcam_source = arm
-        tgt = sc.mocapcam_target
-        if tgt is None or tgt == arm:
-            sc.mocapcam_target = next((o for o in context.view_layer.objects if o.type == "ARMATURE"
-                                       and o != arm and o.name in context.view_layer.objects), None)
-        act = arm.animation_data.action if arm.animation_data else None
-        n = int(round(act.frame_range[1] - act.frame_range[0])) + 1 if act else 0
-        self.report({"INFO"}, f"« {arm.name} » importée : {n} images à {sc.render.fps} i/s")
-        return {"FINISHED"}
-
-
-class MOCAPCAM_OT_retarget(bpy.types.Operator):
-    """Transférer l'animation de la source sur l'armature cible (noms d'os Mixamo)"""
-    bl_idname = "mocapcam.retarget"
-    bl_label = "Retarget"
-    bl_options = {"REGISTER", "UNDO"}
-    root_mode: EnumProperty(name="Déplacement", items=ROOT_ITEMS, default="RELATIVE")
-    hide_source: BoolProperty(name="Cacher la source", default=True)
-
-    @classmethod
-    def poll(cls, context):
-        sc = context.scene
-        s, t = sc.mocapcam_source, sc.mocapcam_target
-        return (s is not None and t is not None and s != t and s.type == "ARMATURE"
-                and t.type == "ARMATURE" and s.animation_data is not None
-                and s.animation_data.action is not None)
-
-    def execute(self, context):
-        sc = context.scene
-        src, dst = sc.mocapcam_source, sc.mocapcam_target
-        if context.mode != "OBJECT":
-            bpy.ops.object.mode_set(mode="OBJECT")
-        try:
-            rep = transfer_motion(context, src, dst, self.root_mode)
-        except RuntimeError as e:
-            self.report({"ERROR"}, str(e))
-            return {"CANCELLED"}
-        act = dst.animation_data.action
-        act.use_fake_user = True
-        sc.frame_start, sc.frame_end = (int(round(v)) for v in act.frame_range)
-        if self.hide_source:
-            src.hide_set(True)
-        for o in context.view_layer.objects:
-            o.select_set(False)
-        dst.select_set(True)
-        context.view_layer.objects.active = dst
-        msg = (f"« {src.name} » -> « {dst.name} » : {rep['animated']} os animés, "
-               f"{rep['frames']} images (déplacement × {rep.get('scale', 1):.2f})")
-        if rep.get("fps_was"):
-            msg += (f" ; scène remise à {_fmt_fps(rep['fps'])} i/s (elle était à "
-                    f"{_fmt_fps(rep['fps_was'])} i/s : l'animation était jouée à la mauvaise vitesse)")
-        self.report({"INFO"}, msg)
-        return {"FINISHED"}
-
-
-class MOCAPCAM_OT_export_fbx(bpy.types.Operator, ExportHelper):
-    """Exporter l'armature active et son animation en FBX (réglages Mixamo, repos en T-pose)"""
-    bl_idname = "mocapcam.export_fbx"
-    bl_label = "Exporter en FBX"
-    filename_ext = ".fbx"
-    filter_glob: StringProperty(default="*.fbx", options={"HIDDEN"})
-
-    @classmethod
-    def poll(cls, context):
-        o = context.active_object
-        return o is not None and o.type == "ARMATURE"
-
-    def execute(self, context):
-        try:
-            export_fbx(context, context.active_object, self.filepath)
-        except Exception as e:
-            self.report({"ERROR"}, f"Export impossible : {e}")
-            return {"CANCELLED"}
-        self.report({"INFO"}, f"FBX écrit : {self.filepath}")
-        return {"FINISHED"}
-
-
-class MOCAPCAM_OT_fix_fps(bpy.types.Operator):
-    """Remettre la scène à la cadence de l'animation (vitesse réelle)"""
-    bl_idname = "mocapcam.fix_fps"
-    bl_label = "Remettre la bonne vitesse"
-    bl_options = {"REGISTER", "UNDO"}
-
-    def execute(self, context):
-        fps = _wanted_fps(context)
-        if fps is None:
-            return {"CANCELLED"}
-        set_scene_fps(context.scene, fps)
-        self.report({"INFO"}, f"Scène à {_fmt_fps(fps)} i/s")
-        return {"FINISHED"}
-
-
-def _wanted_fps(context):
-    sc = context.scene
-    for o in (sc.mocapcam_target, sc.mocapcam_source, context.active_object):
-        if o is not None and o.type == "ARMATURE" and o.animation_data and o.animation_data.action:
-            f = anim_fps(o)
-            if f is not None:
-                return f
-    return None
-
-
 def rig_kind(obj):
     """Nom lisible du type de squelette (Mixamo, Unreal…)."""
     names = [b.name for b in obj.data.bones]
@@ -2094,81 +1635,5 @@ def rig_kind(obj):
     return "autre"
 
 
-def _prefix_label(lay, o):
-    if o is None:
-        return
-    try:
-        m = bone_map(o)
-        lay.label(text=f"squelette {rig_kind(o)}, {len(m)} os reconnus", icon="CHECKMARK")
-    except RuntimeError:
-        lay.label(text="squelette non reconnu", icon="ERROR")
-
-
-class MOCAPCAM_PT_panel(bpy.types.Panel):
-    bl_label = "MOCAM"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "MOCAM"
-
-    def draw(self, context):
-        sc = context.scene
-        lay = self.layout
-        want = _wanted_fps(context)
-        if want is not None and abs(scene_fps(sc) - want) > 1e-3:
-            box = lay.box()
-            box.alert = True
-            box.label(text=f"Animation à {_fmt_fps(want)} i/s, scène à {_fmt_fps(scene_fps(sc))} i/s", icon="ERROR")
-            box.operator(MOCAPCAM_OT_fix_fps.bl_idname, text=f"Remettre la scène à {_fmt_fps(want)} i/s")
-        box = lay.box()
-        box.label(text="1. Animation", icon="ARMATURE_DATA")
-        box.operator(MOCAPCAM_OT_import_fbx.bl_idname, icon="IMPORT")
-        box.prop(sc, "mocapcam_source", text="Source")
-        box = lay.box()
-        box.label(text="2. Personnage", icon="OUTLINER_OB_ARMATURE")
-        box.prop(sc, "mocapcam_target", text="Cible")
-        _prefix_label(box, sc.mocapcam_target)
-        box.operator(MOCAPCAM_OT_retarget.bl_idname, icon="PLAY")
-        lay.separator()
-        lay.operator(MOCAPCAM_OT_export_fbx.bl_idname, icon="EXPORT")
-
-
-def menu_import(self, context):
-    self.layout.operator(MOCAPCAM_OT_import_fbx.bl_idname, text="Animation MOCAM (.fbx)")
-
-
-def menu_export(self, context):
-    self.layout.operator(MOCAPCAM_OT_export_fbx.bl_idname, text="FBX MOCAM (Mixamo)")
-
-
-CLASSES = (MOCAPCAM_OT_import_fbx, MOCAPCAM_OT_retarget, MOCAPCAM_OT_export_fbx, MOCAPCAM_OT_fix_fps,
-           MOCAPCAM_PT_panel)
-
-
-def register():
-    for c in CLASSES:
-        bpy.utils.register_class(c)
-    bpy.types.Scene.mocapcam_source = PointerProperty(
-        name="Source", type=bpy.types.Object, poll=_is_armature,
-        description="Armature animée (ex. le FBX MOCAM importé)")
-    bpy.types.Scene.mocapcam_target = PointerProperty(
-        name="Cible", type=bpy.types.Object, poll=_is_armature,
-        description="Armature du personnage qui reçoit l'animation")
-    bpy.types.TOPBAR_MT_file_import.append(menu_import)
-    bpy.types.TOPBAR_MT_file_export.append(menu_export)
-
-
-def unregister():
-    bpy.types.TOPBAR_MT_file_export.remove(menu_export)
-    bpy.types.TOPBAR_MT_file_import.remove(menu_import)
-    del bpy.types.Scene.mocapcam_target
-    del bpy.types.Scene.mocapcam_source
-    for c in reversed(CLASSES):
-        bpy.utils.unregister_class(c)
-
-
 if __name__ == "__main__":
-    import sys as _sys
-    if "--" in _sys.argv:      # lancé par MOCAM : blender -b ... --python mocapcam_blender.py -- ...
-        main_cli()
-    else:
-        register()
+    main_cli()

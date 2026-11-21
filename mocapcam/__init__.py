@@ -3,8 +3,8 @@
 Pipeline :
   vidéos téléphones -> normalisation (CFR) -> synchro audio (clap)
   -> calibration auto par boules colorées au sol -> pose 2D corps + mains (RTMW)
-  -> triangulation 3D -> nettoyage / lissage -> FBX (squelette Mixamo animé)
-  -> add-on Blender (squelette Mixamo + application sur un perso Mixamo)
+  -> triangulation 3D -> nettoyage / lissage -> FBX (squelette Mixamo animé, via Blender)
+  -> personnage animé (retarget) ; capture du visage (52 blendshapes ARKit)
 """
 
 __version__ = "0.1.0"
