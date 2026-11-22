@@ -52,7 +52,7 @@ import {
   type Settings,
 } from './src/settings'
 
-const APP_VERSION = '1.7.0'
+const APP_VERSION = '1.8.0'
 
 // Erreurs hors affichage (minuteries, callbacks natifs) : on les montre à l'écran
 // au lieu de laisser l'app se fermer.
@@ -335,6 +335,8 @@ function CaptureScreen({
   useEffect(() => () => {
     void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {})
   }, [])
+  // ultra grand-angle qui a refusé de s'ouvrir (certains Android le listent sans le prêter aux apps)
+  const [ultraBroken, setUltraBroken] = useState<string | null>(null)
   const lensSetup = useMemo(() => {
     if (facing === 'front') {
       const front = allDevices.find((d) => d.position === 'front' && !d.isVirtualDevice) ??
@@ -342,7 +344,14 @@ function CaptureScreen({
       if (front) return { device: front, zoom: 1, available: false, used: 'front' as const, fov: 1, options: [1] }
     }
     const back = allDevices.filter((d) => d.position === 'back')
-    const physical = (t: string) => back.find((d) => d.type === t && !d.isVirtualDevice)
+    // caméras arrière, y compris les objectifs qui composent une caméra « virtuelle » (Android)
+    const seen = new Set<string>()
+    const backAll = [...back, ...back.flatMap((d) => d.physicalDevices ?? [])].filter((d) => {
+      if (d.position !== 'back' || seen.has(d.id) || d.id === ultraBroken) return false
+      seen.add(d.id)
+      return true
+    })
+    const physical = (t: string) => backAll.find((d) => d.type === t && !d.isVirtualDevice)
     let wide = defaultBack
     if (Platform.OS === 'ios') {
       // objectif seul : la caméra « par défaut » de l'iPhone peut être virtuelle (LiDAR, double…)
@@ -350,14 +359,23 @@ function CaptureScreen({
     }
     // ultra grand-angle seul (iPhone, certains Android) : son champ par rapport à l'objectif
     // principal vient des focales (13 mm / 26 mm = ×0,5 ; 16 / 26 ≈ ×0,6), sinon ×0,5
-    const ultraDev = physical('ultra-wide-angle') ?? back.find((d) => d.type === 'ultra-wide-angle')
+    // ultra grand-angle : déclaré comme tel, sinon l'objectif à la focale nettement plus courte
+    const wideF = wide?.focalLength
+    const ultraDev =
+      physical('ultra-wide-angle') ??
+      backAll.find((d) => d.type === 'ultra-wide-angle') ??
+      (wideF
+        ? backAll
+            .filter((d) => d.focalLength && d.focalLength < wideF * 0.8 && d.type !== 'telephoto')
+            .sort((a, b) => (a.focalLength ?? 0) - (b.focalLength ?? 0))[0]
+        : undefined)
     const ratio =
       ultraDev?.focalLength && wide?.focalLength && ultraDev.focalLength < wide.focalLength
         ? ultraDev.focalLength / wide.focalLength
         : 0.5
     // Android : l'ultra grand-angle peut aussi s'obtenir en zoomant sous ×1 sur la caméra principale
     const zoomOutDev = !ultraDev && Platform.OS === 'android'
-      ? [defaultBack, ...back].find((d) => d && (d.minZoom ?? 1) < 0.95)
+      ? [defaultBack, ...backAll].find((d) => d && (d.minZoom ?? 1) < 0.95)
       : undefined
     const widest = ultraDev
       ? Math.max(0.3, Math.round(ratio * 10) / 10)
@@ -379,7 +397,16 @@ function CaptureScreen({
     if (want < 0.99 && zoomOutDev)
       return { device: zoomOutDev, zoom: Math.max(zoomOutDev.minZoom, want), available, used: 'ultra' as const, fov: want, options }
     return { device: wide, zoom: 1, available, used: 'wide' as const, fov: 1, options }
-  }, [allDevices, defaultBack, fov, facing])
+  }, [allDevices, defaultBack, fov, facing, ultraBroken])
+  /** Caméras vues par l'app (diagnostic du champ de vision). */
+  const lensReport = useMemo(() => {
+    const seen = new Set<string>()
+    return allDevices
+      .flatMap((d) => [d, ...(d.physicalDevices ?? [])])
+      .filter((d) => (seen.has(d.id) ? false : (seen.add(d.id), true)))
+      .map((d) => `${d.position} ${d.type}${d.isVirtualDevice ? ' (virt.)' : ''} f=${d.focalLength?.toFixed(1) ?? '?'} zoom ${d.minZoom?.toFixed(2)}–${d.maxZoom?.toFixed(0)}`)
+      .join('\n')
+  }, [allDevices])
   const device = lensSetup.device
 
   // 1080p par défaut ; si le téléphone refuse 60 i/s en 1080p et que le PC demande
@@ -941,7 +968,18 @@ function CaptureScreen({
           orientationSource="interface"
           mirrorMode="off"
           onSessionConfigSelected={onConfig}
-          onError={(e) => flash(t(`Caméra : ${e.message}`, `Camera: ${e.message}`))}
+          onError={(e) => {
+            const msg = String(e?.message ?? e)
+            // passager : la caméra n'a pas encore démarré (connexion, changement d'objectif)
+            if (/not active|not (yet )?(started|initialized|ready)/i.test(msg)) return
+            if (lensSetup.used === 'ultra' && device.id !== defaultBack?.id) {
+              setUltraBroken(device.id)       // objectif refusé : retour à ×1, sans insister
+              flash(t("Cet objectif n'est pas accessible aux apps sur ce téléphone : retour à ×1",
+                      "This lens isn't available to apps on this phone: back to ×1"))
+              return
+            }
+            flash(t(`Caméra : ${msg.split('\n')[0]}`, `Camera: ${msg.split('\n')[0]}`))
+          }}
         />
       ) : (
         <View style={styles.center}>
@@ -971,7 +1009,16 @@ function CaptureScreen({
 
       <View style={styles.bottomBar}>
         {lensSetup.options.length < 2 ? (
-          <Text style={styles.small}>{lensSetup.used === 'front' ? t('Caméra avant : capture du visage', 'Front camera: face capture') : t("×1 : ce téléphone ne laisse pas l'app élargir le champ", "×1: this phone doesn't let the app widen the field")}</Text>
+          <Pressable
+            onPress={() => {
+              if (lensSetup.used === 'front') return
+              setBanner(lensReport)
+              setTimeout(() => setBanner((x) => (x === lensReport ? null : x)), 15000)
+            }}
+            hitSlop={8}
+          >
+            <Text style={styles.small}>{lensSetup.used === 'front' ? t('Caméra avant : capture du visage', 'Front camera: face capture') : t("×1 : ce téléphone ne laisse pas l'app élargir le champ", "×1: this phone doesn't let the app widen the field")}</Text>
+          </Pressable>
         ) : null}
         <View style={[styles.seg, lensSetup.options.length < 2 ? { display: 'none' } : null]}>
           {lensSetup.options.map((v) => {
