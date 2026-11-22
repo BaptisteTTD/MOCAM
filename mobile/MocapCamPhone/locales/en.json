@@ -1,5 +1,7 @@
 {
-  "NSCameraUsageDescription": "MOCAM films the actor for motion capture.",
-  "NSMicrophoneUsageDescription": "Sound is used to precisely synchronise the phones with each other.",
-  "NSLocalNetworkUsageDescription": "MOCAM connects to MOCAM Studio on your PC over Wi-Fi."
+  "ios": {
+    "NSCameraUsageDescription": "MOCAM films the actor for motion capture.",
+    "NSMicrophoneUsageDescription": "Sound is used to precisely synchronise the phones with each other.",
+    "NSLocalNetworkUsageDescription": "MOCAM connects to MOCAM Studio on your PC over Wi-Fi."
+  }
 }
