@@ -1,3 +1,4 @@
+import { t } from './i18n'
 // Connexion au PC (MOCAM Studio) : WebSocket + reconnexion automatique.
 
 export type StudioCommand =
@@ -80,14 +81,14 @@ export class StudioClient {
   private tryHosts(_i = 0) {
     if (this.closedByUser) return
     const hosts = this.host ? [this.host, ...this.info.hosts.filter((h) => h !== this.host)] : this.info.hosts
-    this.onState('connecting', 'recherche du PC…')
+    this.onState('connecting', t('recherche du PC…', 'looking for the PC…'))
     let won = false
     let pending = hosts.length
     const sockets: WebSocket[] = []
     const giveUp = () => {
       if (won || this.closedByUser) return
       this.host = null
-      this.onState('error', 'PC introuvable : même Wi-Fi (ou partage de connexion) ? Nouvel essai…')
+      this.onState('error', t('PC introuvable : même Wi-Fi (ou partage de connexion) ? Nouvel essai…', 'PC not found: same Wi-Fi (or hotspot)? Trying again…'))
       this.retry = setTimeout(() => this.tryHosts(0), 2000)
     }
     for (const host of hosts) {
@@ -146,7 +147,7 @@ export class StudioClient {
     ws.onclose = () => {
       if (this.ws === ws) this.ws = null
       if (this.closedByUser) return
-      this.onState('connecting', 'connexion perdue, reconnexion…')
+      this.onState('connecting', t('connexion perdue, reconnexion…', 'connection lost, reconnecting…'))
       this.retry = setTimeout(() => this.tryHosts(0), 1000)
     }
     ws.onerror = () => {

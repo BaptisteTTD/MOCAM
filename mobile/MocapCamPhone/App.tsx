@@ -40,6 +40,7 @@ import {
 } from 'react-native-vision-camera'
 import { parseQr, StudioClient, type ConnectInfo, type ConnState, type StudioCommand } from './src/studio'
 import { decodeQr } from './src/qr'
+import { num, t, tStudio } from './src/i18n'
 import type { Image } from 'react-native-nitro-image'
 import {
   addPending,
@@ -51,7 +52,7 @@ import {
   type Settings,
 } from './src/settings'
 
-const APP_VERSION = '1.6.0'
+const APP_VERSION = '1.7.0'
 
 // Erreurs hors affichage (minuteries, callbacks natifs) : on les montre à l'écran
 // au lieu de laisser l'app se fermer.
@@ -93,12 +94,12 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
       return (
         <View style={styles.center}>
           <StatusBar hidden />
-          <Text style={styles.title}>MOCAM a rencontré une erreur</Text>
+          <Text style={styles.title}>{t('MOCAM a rencontré une erreur', 'MOCAM ran into an error')}</Text>
           <Text style={[styles.text, { fontSize: 13 }]} selectable>
             {String(this.state.error?.message ?? this.state.error)}
           </Text>
-          <Text style={styles.small}>Faites une capture d'écran de ce message pour le diagnostic.</Text>
-          <Btn label="Réessayer" onPress={() => this.setState({ error: null })} />
+          <Text style={styles.small}>{t("Faites une capture d'écran de ce message pour le diagnostic.", 'Take a screenshot of this message for troubleshooting.')}</Text>
+          <Btn label={t('Réessayer', 'Try again')} onPress={() => this.setState({ error: null })} />
         </View>
       )
     }
@@ -122,9 +123,9 @@ function AppInner() {
       <View style={styles.center}>
         <StatusBar hidden />
         <RNImage source={require('./assets/logo-mocam.png')} style={styles.logo} resizeMode="contain" accessibilityLabel="MOCAM" />
-        <Text style={styles.text}>L'app a besoin de la caméra et du micro (le son sert à synchroniser les téléphones).</Text>
+        <Text style={styles.text}>{t("L'app a besoin de la caméra et du micro (le son sert à synchroniser les téléphones).", 'The app needs the camera and the microphone (sound is used to sync the phones).')}</Text>
         <Btn
-          label="Autoriser"
+          label={t('Autoriser', 'Allow')}
           onPress={async () => {
             if (!cam.hasPermission) await cam.requestPermission()
             if (!mic.hasPermission) await mic.requestPermission()
@@ -196,12 +197,14 @@ function ConnectScreen({
         ) : null}
         <View style={styles.scanFrame} pointerEvents="none" />
         <Text style={styles.scanHint}>
-          {bad ? "Ce n'est pas un QR code de MOCAM Studio" : 'Visez le QR code affiché par MOCAM Studio sur le PC'}
+          {bad
+            ? t("Ce n'est pas un QR code de MOCAM Studio", "This isn't a MOCAM Studio QR code")
+            : t('Visez le QR code affiché par MOCAM Studio sur le PC', 'Aim at the QR code shown by MOCAM Studio on the PC')}
         </Text>
       </View>
       <View style={styles.side}>
         <RNImage source={require('./assets/logo-mocam.png')} style={styles.logo} resizeMode="contain" accessibilityLabel="MOCAM" />
-        <Text style={styles.label}>Nom de cette caméra</Text>
+        <Text style={styles.label}>{t('Nom de cette caméra', 'Name of this camera')}</Text>
         <TextInput
           style={styles.input}
           value={settings.name}
@@ -210,17 +213,19 @@ function ConnectScreen({
           onChangeText={(t) => onSettings({ ...settings, name: t })}
           onEndEditing={() => onSettings({ ...settings, name: cleanName(settings.name) })}
         />
-        <Text style={styles.small}>Il donne son nom à la vidéo : iphone, poco…</Text>
+        <Text style={styles.small}>{t('Il donne son nom à la vidéo : iphone, poco…', 'It names the video: iphone, poco…')}</Text>
         <Pressable accessibilityRole="link" onPress={() => void Linking.openURL(STUDIO_DOWNLOAD_URL)} hitSlop={8}>
-          <Text style={styles.link}>Télécharger MOCAM Studio pour le PC (Windows)</Text>
+          <Text style={styles.link}>{t('Télécharger MOCAM Studio pour le PC (Windows)', 'Download MOCAM Studio for the PC (Windows)')}</Text>
         </Pressable>
         <Text style={[styles.small, { marginTop: 18, color: '#aab' }]}>
-          Le téléphone et le PC doivent être sur le même Wi-Fi. Sans Wi-Fi, activez le partage de connexion
-          d'un des téléphones et connectez-y le PC : ce téléphone peut filmer lui aussi.
+          {t(
+            "Le téléphone et le PC doivent être sur le même Wi-Fi. Sans Wi-Fi, activez le partage de connexion d'un des téléphones et connectez-y le PC : ce téléphone peut filmer lui aussi.",
+            "The phone and the PC must be on the same Wi-Fi. Without Wi-Fi, turn on one phone's hotspot and connect the PC to it: that phone can shoot too.",
+          )}
         </Text>
         {lastInfo ? (
           <Btn
-            label="Reprendre la dernière connexion"
+            label={t('Reprendre la dernière connexion', 'Resume the last connection')}
             onPress={() => {
               done.current = true
               onConnect(lastInfo, settings.lastQr!)
@@ -484,7 +489,7 @@ function CaptureScreen({
   const uploadFile = useCallback(async (filePath: string, take: string) => {
     const client = clientRef.current
     if (!client?.baseUrl) {
-      flash("Pas de connexion : la vidéo reste sur le téléphone")
+      flash(t('Pas de connexion : la vidéo reste sur le téléphone', 'No connection: the video stays on the phone'))
       return
     }
     const uri = filePath.startsWith('file://') ? filePath : `file://${filePath}`
@@ -518,14 +523,14 @@ function CaptureScreen({
         } catch {
           // pas grave
         }
-        flash('Vidéo envoyée au PC')
+        flash(t('Vidéo envoyée au PC', 'Video sent to the PC'))
       } else {
         client.send({ t: 'upload_error', take, message: `HTTP ${res.status}` })
-        flash(`Erreur d'envoi (HTTP ${res.status})`)
+        flash(t(`Erreur d'envoi (HTTP ${res.status})`, `Upload error (HTTP ${res.status})`))
       }
     } catch (e) {
       client.send({ t: 'upload_error', take, message: String(e) })
-      flash("Erreur d'envoi : la vidéo reste sur le téléphone")
+      flash(t("Erreur d'envoi : la vidéo reste sur le téléphone", 'Upload error: the video stays on the phone'))
     } finally {
       sub.remove()
       setUpload(null)
@@ -572,7 +577,7 @@ function CaptureScreen({
             setRecording(null)
             recorderRef.current = null
             client?.send({ t: 'error', message: `enregistrement : ${error.message}` })
-            flash(`Erreur d'enregistrement : ${error.message}`)
+            flash(t(`Erreur d'enregistrement : ${error.message}`, `Recording error: ${error.message}`))
           },
         )
         const started = Date.now()
@@ -580,7 +585,7 @@ function CaptureScreen({
         client?.send({ t: 'recording', take, called_at: called, started_at: started })
       } catch (e) {
         client?.send({ t: 'error', message: `démarrage : ${String(e)}` })
-        flash(`Impossible de démarrer : ${String(e)}`)
+        flash(t(`Impossible de démarrer : ${String(e)}`, `Couldn't start: ${String(e)}`))
       }
     },
     [arm, uploadFile],
@@ -622,7 +627,7 @@ function CaptureScreen({
       client?.send({ t: 'locked', ok: true })
     } catch (e) {
       client?.send({ t: 'locked', ok: false, message: String(e) })
-      flash(`Blocage impossible : ${String(e)}`)
+      flash(t(`Blocage impossible : ${String(e)}`, `Couldn't lock: ${String(e)}`))
     }
   }, [])
 
@@ -757,7 +762,7 @@ function CaptureScreen({
           onSettings({ ...settings, name: cleanName(cmd.name) })
           break
         case 'error':
-          flash(cmd.message)
+          flash(tStudio(cmd.message))
           break
       }
     },
@@ -769,7 +774,7 @@ function CaptureScreen({
   // erreurs inattendues : bandeau + signalement au PC, sans couper la caméra ni la connexion
   useEffect(() => {
     const l = (e: Error) => {
-      flash(`Erreur : ${e?.message ?? String(e)}`)
+      flash(t(`Erreur : ${e?.message ?? String(e)}`, `Error: ${e?.message ?? String(e)}`))
       clientRef.current?.send({ t: 'error', message: `app : ${e?.message ?? String(e)}` })
     }
     errorListeners.add(l)
@@ -936,7 +941,7 @@ function CaptureScreen({
           orientationSource="interface"
           mirrorMode="off"
           onSessionConfigSelected={onConfig}
-          onError={(e) => flash(`Caméra : ${e.message}`)}
+          onError={(e) => flash(t(`Caméra : ${e.message}`, `Camera: ${e.message}`))}
         />
       ) : (
         <View style={styles.center}>
@@ -953,7 +958,7 @@ function CaptureScreen({
         <View style={[styles.dot, { backgroundColor: connColor }]} />
         <Text style={styles.camName}>{settings.name}</Text>
         <Text style={styles.small}>
-          {conn.state === 'connected' ? 'connecté à MOCAM Studio' : conn.detail ?? 'connexion…'}
+          {conn.state === 'connected' ? t('connecté à MOCAM Studio', 'connected to MOCAM Studio') : conn.detail ?? t('connexion…', 'connecting…')}
         </Text>
         <View style={{ flex: 1 }} />
         {recording ? (
@@ -966,7 +971,7 @@ function CaptureScreen({
 
       <View style={styles.bottomBar}>
         {lensSetup.options.length < 2 ? (
-          <Text style={styles.small}>{lensSetup.used === 'front' ? 'Caméra avant : capture du visage' : "×1 : ce téléphone ne laisse pas l'app élargir le champ"}</Text>
+          <Text style={styles.small}>{lensSetup.used === 'front' ? t('Caméra avant : capture du visage', 'Front camera: face capture') : t("×1 : ce téléphone ne laisse pas l'app élargir le champ", "×1: this phone doesn't let the app widen the field")}</Text>
         ) : null}
         <View style={[styles.seg, lensSetup.options.length < 2 ? { display: 'none' } : null]}>
           {lensSetup.options.map((v) => {
@@ -978,23 +983,23 @@ function CaptureScreen({
                 onPress={() => setFov(v)}
                 style={[styles.segBtn, on && styles.segOn, recording ? { opacity: 0.4 } : null]}
               >
-                <Text style={[styles.segText, on && styles.segTextOn]}>{`×${String(v).replace('.', ',')}`}</Text>
+                <Text style={[styles.segText, on && styles.segTextOn]}>{`×${num(v)}`}</Text>
               </Pressable>
             )
           })}
         </View>
         <Text style={styles.small}>
-          {camStatus.fps ? `${camStatus.fps} i/s` : '… i/s'}
-          {locked ? '   exposition bloquée' : ''}
+          {camStatus.fps ? `${camStatus.fps} ${t('i/s', 'fps')}` : `… ${t('i/s', 'fps')}`}
+          {locked ? t('   exposition bloquée', '   exposure locked') : ''}
         </Text>
         <View style={{ flex: 1 }} />
-        {upload ? <Text style={styles.small}>Envoi {Math.round(upload.pct * 100)} %</Text> : null}
+        {upload ? <Text style={styles.small}>{t('Envoi', 'Sending')} {Math.round(upload.pct * 100)} %</Text> : null}
         <Pressable
           disabled={!!recording}
           onPress={() => setFacing(faceMode ? 'back' : 'front')}
           style={[styles.smallBtn, faceMode ? styles.faceOn : null, recording ? { opacity: 0.4 } : null]}
         >
-          <Text style={styles.smallBtnText}>{faceMode ? 'Visage : oui' : 'Visage'}</Text>
+          <Text style={styles.smallBtnText}>{faceMode ? t('Visage : oui', 'Face: on') : t('Visage', 'Face')}</Text>
         </Pressable>
         <Pressable
           style={styles.smallBtn}
@@ -1003,14 +1008,14 @@ function CaptureScreen({
             onDisconnect()
           }}
         >
-          <Text style={styles.smallBtnText}>Déconnecter</Text>
+          <Text style={styles.smallBtnText}>{t('Déconnecter', 'Disconnect')}</Text>
         </Pressable>
       </View>
 
       {faceMode ? (
         <View style={styles.faceRecWrap} pointerEvents="box-none">
           <Pressable
-            accessibilityLabel={recording ? "Arrêter l'enregistrement du visage" : 'Enregistrer le visage'}
+            accessibilityLabel={recording ? t("Arrêter l'enregistrement du visage", 'Stop recording the face') : t('Enregistrer le visage', 'Record the face')}
             disabled={conn.state !== 'connected' || (!recording && !!upload)}
             onPress={() => clientRef.current?.send({ t: 'face_record' })}
             style={[styles.faceRec, conn.state !== 'connected' ? { opacity: 0.4 } : null,
@@ -1019,7 +1024,7 @@ function CaptureScreen({
             <View style={recording ? styles.faceRecStop : styles.faceRecDot} />
           </Pressable>
           <Text style={styles.small}>
-            {conn.state !== 'connected' ? 'Non connecté' : recording ? 'Arrêter' : upload ? 'Envoi…' : 'REC visage'}
+            {conn.state !== 'connected' ? t('Non connecté', 'Not connected') : recording ? t('Arrêter', 'Stop') : upload ? t('Envoi…', 'Sending…') : t('REC visage', 'REC face')}
           </Text>
         </View>
       ) : null}

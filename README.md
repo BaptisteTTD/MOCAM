@@ -52,6 +52,9 @@ Ce que vous obtenez pour chaque prise :
 2. Double-cliquez sur **`MOCAM Studio.exe`**. Un raccourci est créé sur le Bureau. Au premier
    traitement, les modèles de détection (environ 200 Mo) se téléchargent tout seuls.
 
+MOCAM Studio et l'app sont en français ou en anglais, selon la langue du PC et du téléphone
+(le Studio a aussi un choix *Langue* dans ses réglages).
+
 Windows peut afficher « Windows a protégé votre ordinateur » : *Informations complémentaires*,
 puis *Exécuter quand même* (le programme n'est pas signé). Pour tout vérifier, lancez
 `"MOCAM Studio.exe" diagnostic` dans une invite de commandes.

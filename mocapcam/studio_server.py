@@ -32,11 +32,11 @@ from aiohttp import WSMsgType, web
 
 from . import fbx, markers as mk, pipeline, sync
 
-from .paths import FROZEN, ROOT, self_command
+from .paths import FROZEN, ROOT, say, self_command
 
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "studio_ui")
 # version du serveur : l'interface (index.html) vérifie qu'elle parle au serveur de la même version
-STUDIO_VERSION = "1.9.0"
+STUDIO_VERSION = "1.10.0"
 
 # horloge du PC en ms (monotone, calée sur l'heure système au démarrage)
 _EPOCH = time.time() * 1000 - time.monotonic() * 1000
@@ -1439,7 +1439,7 @@ class Studio:
         app.router.add_post("/character", self.handle_character_upload)
         app.router.add_get("/character/{cid}/apercu.glb", self.handle_character_glb)
         app.router.add_get("/take/{take}/apercu.glb", self.handle_take_glb)
-        for img in ("logo-mocam.png", "favicon.png", "mocam.ico"):
+        for img in ("logo-mocam.png", "favicon.png", "mocam.ico", "i18n.js"):
             app.router.add_get("/" + img, lambda r, img=img: web.FileResponse(
                 os.path.join(UI_DIR, img), headers={"Cache-Control": "max-age=3600"}))
         app.router.add_static("/vendor/", os.path.join(UI_DIR, "vendor"), show_index=False)
@@ -1490,7 +1490,8 @@ def make_shortcuts():
                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         os.makedirs(os.path.dirname(done), exist_ok=True)
         open(done, "w").close()
-        print("  raccourci « MOCAM Studio » (avec son icône) créé sur le Bureau et dans le dossier MOCAM")
+        print(say("  raccourci « MOCAM Studio » (avec son icône) créé sur le Bureau et dans le dossier MOCAM",
+                  '  "MOCAM Studio" shortcut (with its icon) created on the Desktop and in the MOCAM folder'))
     except (OSError, subprocess.SubprocessError):
         pass
 
@@ -1563,27 +1564,35 @@ def run(studio_dir, captures_dir, port=8765, open_ui=True):
     if not _port_free(port):
         other = _running_studio(port)
         if other == STUDIO_VERSION:
-            print(f"MOCAM Studio est déjà ouvert ({url}) : sa fenêtre est réaffichée.")
+            print(say(f"MOCAM Studio est déjà ouvert ({url}) : sa fenêtre est réaffichée.",
+                      f"MOCAM Studio is already open ({url}): its window is shown again."))
             if open_ui:
                 open_window(url)
             return
         if other is None:
             pass        # rien ne répond (port en cours de libération) : on tente de démarrer
         elif _stop_old_studio(port):
-            print(f"Un MOCAM Studio d'une autre version ({other}) tournait encore : il a été fermé "
-                  "et remplacé par celui-ci. Vous pouvez fermer son ancienne fenêtre noire.")
+            print(say(f"Un MOCAM Studio d'une autre version ({other}) tournait encore : il a été fermé "
+                      "et remplacé par celui-ci. Vous pouvez fermer son ancienne fenêtre noire.",
+                      f"A MOCAM Studio of another version ({other}) was still running: it was closed and "
+                      "replaced by this one. You can close its old black window."))
         else:
-            print(f"Le port {port} est déjà utilisé" + (f" par MOCAM Studio ({other})" if other else
-                                                        " par un autre programme") +
-                  " : fermez-le (ou fermez les autres fenêtres noires de MOCAM), puis relancez.")
+            print(say(f"Le port {port} est déjà utilisé" + (f" par MOCAM Studio ({other})" if other else
+                                                            " par un autre programme") +
+                      " : fermez-le (ou fermez les autres fenêtres noires de MOCAM), puis relancez.",
+                      f"Port {port} is already in use" + (f" by MOCAM Studio ({other})" if other else
+                                                          " by another program") +
+                      ": close it (or close MOCAM's other black windows), then restart."))
             return
     threading_sc = __import__("threading").Thread(target=make_shortcuts, daemon=True)
     threading_sc.start()
     st = Studio(studio_dir, captures_dir, port)
     print(f"MOCAM Studio {STUDIO_VERSION} : {url}")
-    print(f"  réseau : {', '.join(st.net.get('hosts') or lan_addresses())} (port {port}) — connectez les téléphones avec le QR code")
-    print(f"  prises enregistrées dans : {st.captures_dir}")
-    print("  Laissez cette fenêtre ouverte. Ctrl+C pour quitter.")
+    hosts = ', '.join(st.net.get('hosts') or lan_addresses())
+    print(say(f"  réseau : {hosts} (port {port}) — connectez les téléphones avec le QR code",
+              f"  network: {hosts} (port {port}) — connect the phones with the QR code"))
+    print(say(f"  prises enregistrées dans : {st.captures_dir}", f"  takes saved in: {st.captures_dir}"))
+    print(say("  Laissez cette fenêtre ouverte. Ctrl+C pour quitter.", "  Keep this window open. Ctrl+C to quit."))
     if open_ui:
         threading_open = __import__("threading").Timer(1.0, open_window, args=(url,))
         threading_open.start()

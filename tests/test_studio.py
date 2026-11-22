@@ -7,6 +7,7 @@ bande-son contient le signal de synchro au bon instant, et l'envoient au PC.
 import asyncio
 import json
 import os
+os.environ.setdefault("MOCAM_LANG", "fr")       # messages de la fenêtre du Studio en français
 import random
 import subprocess
 import sys
@@ -207,7 +208,21 @@ async def main():
             harness = dict(chirps=[])
             async with async_playwright() as p:
                 browser = await p.chromium.launch(args=["--autoplay-policy=no-user-gesture-required"])
-                page = await browser.new_page(viewport=dict(width=1500, height=950))
+                page = await browser.new_page(viewport=dict(width=1500, height=950), locale=os.environ.get("MOCAM_TEST_LOCALE", "fr-FR"))
+                if os.environ.get("MOCAM_HARVEST"):      # relevé des textes affichés (traduction)
+                    await page.add_init_script("""
+                      window.__seen = new Set();
+                      const grab = n => {
+                        if (n.nodeType === 3) { const t = n.nodeValue.trim(); if (t) window.__seen.add(t); return; }
+                        if (n.nodeType !== 1 || ['SCRIPT','STYLE','svg'].includes(n.nodeName)) return;
+                        for (const a of ['title','placeholder','aria-label','alt']) { const v = n.getAttribute && n.getAttribute(a); if (v) window.__seen.add(v); }
+                        n.childNodes.forEach(grab);
+                      };
+                      new MutationObserver(ms => ms.forEach(m => { m.addedNodes.forEach(grab); if (m.type === 'characterData') grab(m.target); }))
+                        .observe(document, {subtree: true, childList: true, characterData: true});
+                      document.addEventListener('DOMContentLoaded', () => grab(document.body));
+                      const _c = window.confirm; window.confirm = m => { window.__seen.add(m); return true; };
+                    """)
                 page_errors = []
                 page.on("pageerror", lambda e: page_errors.append(str(e)))
                 chirps = []
@@ -423,6 +438,27 @@ async def main():
                 shot3 = os.path.join(D, "studio_fin.png")
                 await page.screenshot(path=shot3)
                 SHOTS.append(shot3)
+                # interface en anglais (navigateur en anglais) : rien ne reste en français
+                pen = await browser.new_page(viewport=dict(width=1500, height=950), locale="en-US")
+                pen_err = []
+                pen.on("pageerror", lambda e: pen_err.append(str(e)))
+                await pen.goto(f"http://127.0.0.1:{PORT}/")
+                await pen.wait_for_timeout(2500)
+                texts = []
+                for pg_id in ("pCams", "pTakes", "pFace", "pChars"):
+                    await pen.evaluate(f"showPage('{pg_id}')")
+                    await pen.wait_for_timeout(700)
+                    texts.append(await pen.evaluate("document.querySelector('main.page.on').innerText + document.querySelector('header').innerText"))
+                allt = "\n".join(texts)
+                fr_left = [w for w in ("Avant de filmer", "Tournage", "Prises", "Personnages", "Enregistrer", "Aucune", " de la ", "vidéo")
+                           if w in allt]
+                ok("interface en anglais", not pen_err and "Before shooting" in allt and "Characters" in allt and not fr_left,
+                   f"restes en français : {fr_left or 'aucun'}{' ; erreurs ' + str(pen_err) if pen_err else ''}")
+                await pen.close()
+                if os.environ.get("MOCAM_HARVEST"):
+                    seen = await page.evaluate("[...window.__seen]")
+                    with open(os.environ["MOCAM_HARVEST"], "w", encoding="utf-8") as f:
+                        json.dump(sorted(seen), f, ensure_ascii=False, indent=0)
                 await browser.close()
             for tsk in tasks:
                 tsk.cancel()

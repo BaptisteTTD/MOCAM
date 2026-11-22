@@ -2,7 +2,7 @@
   "expo": {
     "name": "MOCAM",
     "slug": "mocapcam-phone",
-    "version": "1.6.0",
+    "version": "1.7.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -10,9 +10,9 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.mocam.app",
       "infoPlist": {
-        "NSCameraUsageDescription": "MOCAM filme l'acteur pour la capture de mouvement.",
-        "NSMicrophoneUsageDescription": "Le son sert à synchroniser précisément les téléphones entre eux.",
-        "NSLocalNetworkUsageDescription": "MOCAM se connecte à MOCAM Studio sur votre PC via le Wi-Fi.",
+        "NSCameraUsageDescription": "MOCAM films the actor for motion capture.",
+        "NSMicrophoneUsageDescription": "Sound is used to precisely synchronise the phones with each other.",
+        "NSLocalNetworkUsageDescription": "MOCAM connects to MOCAM Studio on your PC over Wi-Fi.",
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true,
           "NSAllowsArbitraryLoads": true
@@ -20,7 +20,7 @@
         "UIRequiresFullScreen": true,
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "14"
+      "buildNumber": "15"
     },
     "android": {
       "package": "com.mocam.app",
@@ -36,7 +36,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "versionCode": 14
+      "versionCode": 15
     },
     "plugins": [
       [
@@ -53,6 +53,10 @@
           "initialOrientation": "LANDSCAPE"
         }
       ]
-    ]
+    ],
+    "locales": {
+      "fr": "./locales/fr.json",
+      "en": "./locales/en.json"
+    }
   }
 }

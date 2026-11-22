@@ -225,6 +225,81 @@
   #disc { position: fixed; inset: 0; background: #0b0d12e6; display: none; align-items: center; justify-content: center; font-size: 17px; z-index: 50; text-align: center; padding: 30px; }
   .empty-page { display: grid; place-items: center; color: var(--muted); padding: 40px; text-align: center; }
 </style>
+<script src="/i18n.js"></script>
+<script>
+// ------------------------------------------------------------------ langue (français / anglais)
+const LANG = (() => {
+  try { const l = localStorage.getItem('mocam-lang'); if (l === 'fr' || l === 'en') return l; } catch (e) {}
+  return (navigator.language || 'fr').toLowerCase().startsWith('fr') ? 'fr' : 'en';
+})();
+document.documentElement.lang = LANG;
+const I18N = (() => {
+  const D = window.MOCAM_I18N || { exact: {}, patterns: [], frags: [] };
+  const esc = (x) => x.replace(/[.*+?^$()|[\]\\]/g, '\\$&');
+  const pats = D.patterns.map(([fr, en]) => {
+    const idx = {}; let re = '^', last = 0, g = 0;
+    fr.replace(/\{(\d+)(:n)?\}/g, (m, i, num, off) => {
+      re += esc(fr.slice(last, off)) + (num ? '([-+−]?[\\d\\s .,]*\\d)' : '(.*?)');
+      idx[i] = ++g; last = off + m.length; return m;
+    });
+    re += esc(fr.slice(last)) + '$';
+    return { re: new RegExp(re), en, idx };
+  });
+  return { exact: D.exact, pats, frags: D.frags };
+})();
+function trCore(c, depth = 0, strict = false) {
+  const e = I18N.exact[c];
+  if (e != null) return e;
+  if (depth < 3) for (const p of I18N.pats) {
+    const m = p.re.exec(c);
+    if (m) return p.en.replace(/\{(\d+)\}/g, (_, i) => { const v = m[p.idx[i]]; return v == null ? '' : trCore(v, depth + 1); });
+  }
+  if (strict) return null;
+  let out = c;
+  for (const [re, rep] of I18N.frags) out = out.replace(re, rep);
+  return out;
+}
+function trLine(line) {
+  const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(line);
+  return m[2] ? m[1] + trCore(m[2]) + m[3] : line;
+}
+/** Texte affiché dans la langue choisie (le Studio est écrit en français). */
+function T(s) {
+  if (LANG !== 'en' || s == null) return s;
+  s = String(s);
+  if (!s.includes('\n')) return trLine(s);
+  const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(s);
+  const whole = m[2] ? trCore(m[2], 0, true) : null;     // message sur plusieurs lignes, connu en entier
+  return whole != null ? m[1] + whole + m[3] : s.split('\n').map(trLine).join('\n');
+}
+function trNode(n) {
+  if (n.nodeType === 3) {
+    const p = n.parentNode;
+    if (!p || p.nodeName === 'SCRIPT' || p.nodeName === 'STYLE' || p.nodeName === 'TEXTAREA' || (p.closest && p.closest('.notr'))) return;
+    const v = n.nodeValue;
+    if (/[A-Za-zÀ-ÿ]/.test(v)) { const t = T(v); if (t !== v) n.nodeValue = t; }
+    return;
+  }
+  if (n.nodeType !== 1 || n.nodeName === 'SCRIPT' || n.nodeName === 'STYLE' || n.classList.contains('notr')) return;
+  for (const a of ['title', 'placeholder', 'aria-label', 'alt']) {
+    const v = n.getAttribute(a);
+    if (v) { const t = T(v); if (t !== v) n.setAttribute(a, t); }
+  }
+  for (const c of n.childNodes) trNode(c);
+}
+if (LANG === 'en') {
+  new MutationObserver((ms) => {
+    for (const m of ms) {
+      if (m.type === 'childList') m.addedNodes.forEach(trNode);
+      else if (m.type === 'characterData') trNode(m.target);
+      else { const v = m.target.getAttribute(m.attributeName); if (v) { const t = T(v); if (t !== v) m.target.setAttribute(m.attributeName, t); } }
+    }
+  }).observe(document.documentElement, { subtree: true, childList: true, characterData: true,
+                                         attributes: true, attributeFilter: ['title', 'placeholder', 'aria-label', 'alt'] });
+  document.addEventListener('DOMContentLoaded', () => trNode(document.body));
+}
+function setLang(l) { try { localStorage.setItem('mocam-lang', l); } catch (e) {} location.reload(); }
+</script>
 </head>
 <body>
 <header class="top">
@@ -325,6 +400,10 @@
     <p class="hint">Les téléphones déjà connectés le restent ; les autres devront scanner le nouveau code.</p>
   </section>
   <section>
+    <h3>Langue</h3>
+    <span class="seg notr" role="group" aria-label="Language"><button id="langFr" onclick="setLang('fr')">Français</button><button id="langEn" onclick="setLang('en')">English</button></span>
+  </section>
+  <section>
     <h3>Dossiers</h3>
     <div class="row"><button class="btn" data-open="">Prises</button><button class="btn" id="btnOpenChars">Personnages</button></div>
     <p class="hint" id="paths"></p>
@@ -339,19 +418,19 @@
 <script>
 let ws, S = null, serverDelta = 0, takeTyped = false, selTake = null, logText = '';
 const autoAnimated = new Set();   // prises où le personnage par défaut a été lancé automatiquement
-const UI_VERSION = '1.9.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
+const UI_VERSION = '1.10.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
 function newerVersion(a, b) {
   const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
   for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
   return false;
 }
-function fatal(title, detail) { $('fatalT').textContent = title; $('fatalD').textContent = detail; $('fatal').style.display = 'flex'; }
+function fatal(title, detail) { $('fatalT').textContent = T(title); $('fatalD').textContent = T(detail); $('fatal').style.display = 'flex'; }
 // aperçu 3D : remplacé par le module three.js dès qu'il est chargé
 window.mcViewer = window.mcViewer || { show() {}, toggle() { return true; }, seek() {} };
 window.mcRerender = () => { if (S) { renderTakeDetail(true); renderFaceDetail(true); } };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const fr = (v, d = 1) => Number(v).toLocaleString('fr-FR', { maximumFractionDigits: d });
+const fr = (v, d = 1) => Number(v).toLocaleString(LANG === 'en' ? 'en-US' : 'fr-FR', { maximumFractionDigits: d });
 const BALL = { rouge: 'var(--ball-red)', vert: 'var(--ball-green)', bleu: 'var(--ball-blue)', jaune: 'var(--ball-yellow)',
                orange: '#f08a3c', violet: '#9b6cf0', rose: '#ef6fb0', blanc: '#eee' };
 
@@ -517,7 +596,7 @@ function camCard(c) {
       <button class="btn small" onclick="renameCam('${c.id}','${esc(c.name)}')">Renommer</button>
       <span class="spacer"></span>
       <span class="hint">${tk.state ? esc(stateFr(tk.state)) : ''}</span>
-      <button class="btn small danger" onclick="if(confirm('Déconnecter ${esc(c.name)} ?')) send({a:'kick',cam:'${c.id}'})">Déconnecter</button>
+      <button class="btn small danger" onclick="if(confirm(T('Déconnecter ${esc(c.name)} ?'))) send({a:'kick',cam:'${c.id}'})">Déconnecter</button>
     </div>
   </article>`;
 }
@@ -595,7 +674,7 @@ function renderShoot() {
   $('checklist').innerHTML = html;
 }
 function record() { takeTyped = false; send({ a: 'record', take: $('takeName').value.trim() }); actx = actx || new AudioContext(); actx.resume(); }
-function renameCam(id, old) { const n = prompt('Nom de la caméra (sert de nom de fichier) :', old); if (n) send({ a: 'rename', cam: id, name: n }); }
+function renameCam(id, old) { const n = prompt(T('Nom de la caméra (sert de nom de fichier) :'), old); if (n) send({ a: 'rename', cam: id, name: n }); }
 function showCheck(id) { $('modalImg').src = `/check/${id}?t=${Date.now()}`; $('modal').classList.add('on'); }
 window.renameCam = renameCam; window.showCheck = showCheck; window.record = record;
 
@@ -620,7 +699,7 @@ function renderTakesList() {
 }
 function selectTake(n) { selTake = n; renderTakesList(); renderTakeDetail(true); }
 function deleteTake(n) {
-  if (!confirm(`Supprimer la prise ${n} ?\n\nSon dossier (vidéos et FBX) part à la corbeille de Windows : vous pourrez le récupérer.`)) return;
+  if (!confirm(T(`Supprimer la prise ${n} ?\n\nSon dossier (vidéos et FBX) part à la corbeille de Windows : vous pourrez le récupérer.`))) return;
   send({ a: 'take_delete', take: n });
 }
 window.deleteTake = deleteTake;
@@ -757,7 +836,7 @@ function renderChars() {
         <div class="acts">
           ${i.face_only ? `<span class="hint" style="font-size:13px">Pas de squelette : ne peut pas être animé par la capture du corps</span>` : def ? '<span class="ok-t" style="font-size:13px">Par défaut : animé après chaque traitement</span>' : `<button class="btn small" onclick="send({a:'character_default',id:'${esc(c.id)}'})">Utiliser par défaut</button>`}
           <span style="flex:1"></span>
-          ${c.builtin ? '' : `<button class="btn small danger" onclick="if(confirm('Supprimer ${esc(c.name)} ?')) send({a:'character_delete',id:'${esc(c.id)}'})">Supprimer</button>`}
+          ${c.builtin ? '' : `<button class="btn small danger" onclick="if(confirm(T('Supprimer ${esc(c.name)} ?'))) send({a:'character_delete',id:'${esc(c.id)}'})">Supprimer</button>`}
         </div>
       </div>
     </article>`;
@@ -915,7 +994,7 @@ function renderFaceDetail(force) {
     <div class="take-head">
       <div><h1>${esc(f.name)}</h1>
         <div class="sub">${[f.created && esc(f.created), f.duration && fr(f.duration) + ' s', f.frames && `${f.frames} images à ${fr(f.fps, 0)} i/s`, esc(f.video || 'pas de vidéo')].filter(Boolean).join(' — ')}</div></div>
-      <button class="btn small danger icon-btn" ${running ? 'disabled' : ''} onclick="if(confirm('Supprimer ${esc(f.name)} ?\\n\\nSon dossier part à la corbeille de Windows.')) send({a:'face_delete',name:'${esc(f.name)}'})">
+      <button class="btn small danger icon-btn" ${running ? 'disabled' : ''} onclick="if(confirm(T('Supprimer ${esc(f.name)} ?\\n\\nSon dossier part à la corbeille de Windows.'))) send({a:'face_delete',name:'${esc(f.name)}'})">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg>
         Supprimer</button>
     </div>
@@ -1256,6 +1335,6 @@ async function renderThumb(el) {
 window.addEventListener('mc-thumbs', () => document.querySelectorAll('[data-thumb]').forEach(renderThumb));
 document.querySelectorAll('[data-thumb]').forEach(renderThumb);
 </script>
-<script>connect();</script>
+<script>$('langFr').setAttribute('aria-pressed', LANG === 'fr'); $('langEn').setAttribute('aria-pressed', LANG === 'en'); connect();</script>
 </body>
 </html>

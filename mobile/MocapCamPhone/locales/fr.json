@@ -1,0 +1,5 @@
+{
+  "NSCameraUsageDescription": "MOCAM filme l'acteur pour la capture de mouvement.",
+  "NSMicrophoneUsageDescription": "Le son sert à synchroniser précisément les téléphones entre eux.",
+  "NSLocalNetworkUsageDescription": "MOCAM se connecte à MOCAM Studio sur votre PC via le Wi-Fi."
+}
