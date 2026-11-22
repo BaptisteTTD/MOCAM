@@ -1,0 +1,162 @@
+# Builds de l'app MOCAM pour l'App Store et Google Play (signés), sur les serveurs de GitHub.
+# Lancement : onglet "Actions" > "Stores MOCAM" > "Run workflow".
+#
+# iPhone  : l'app est signée et envoyée directement dans App Store Connect (TestFlight), où
+#           vous la choisissez ensuite pour la version à soumettre à Apple.
+# Android : fichier MOCAM-play.aab signé (rubrique "Artifacts"), à déposer dans Play Console.
+#
+# Secrets à créer une fois (Settings > Secrets and variables > Actions), voir docs/store/builds.md :
+#   APPLE_TEAM_ID, ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8
+#   ANDROID_KEYSTORE_B64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS
+name: Stores MOCAM
+
+on:
+  workflow_dispatch:
+    inputs:
+      plateforme:
+        description: "Plateformes à construire"
+        type: choice
+        options: [les deux, iphone, android]
+        default: les deux
+
+defaults:
+  run:
+    working-directory: mobile/MocapCamPhone
+
+jobs:
+  android:
+    if: inputs.plateforme != 'iphone'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/MocapCamPhone/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Secrets présents
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KP: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KA: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          [ -n "$KS" ] && [ -n "$KP" ] && [ -n "$KA" ] || { echo "::error::Secrets Android manquants : voir docs/store/builds.md"; exit 1; }
+      - run: npm ci
+      - name: Numéro de build (toujours croissant)
+        env:
+          RUN: ${{ github.run_number }}
+        run: |
+          node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('app.json'));j.expo.android.versionCode=1000+Number(process.env.RUN);fs.writeFileSync('app.json',JSON.stringify(j,null,2));console.log('versionCode',j.expo.android.versionCode,'version',j.expo.version)"
+      - run: npx expo prebuild --platform android --no-install
+        env:
+          CI: 1
+      - name: Clé de signature
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: echo "$KS" | base64 -d > "$RUNNER_TEMP/mocam-upload.p12"
+      - name: Compilation AAB signé
+        working-directory: mobile/MocapCamPhone/android
+        env:
+          KP: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KA: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          ./gradlew bundleRelease --no-daemon \
+            -Pandroid.injected.signing.store.file="$RUNNER_TEMP/mocam-upload.p12" \
+            -Pandroid.injected.signing.store.password="$KP" \
+            -Pandroid.injected.signing.key.alias="$KA" \
+            -Pandroid.injected.signing.key.password="$KP"
+      - name: Vérification de la signature
+        run: |
+          cp android/app/build/outputs/bundle/release/app-release.aab MOCAM-play.aab
+          keytool -printcert -jarfile MOCAM-play.aab | tee cert.txt | head -n 8
+          if grep -q "Android Debug" cert.txt; then echo "::error::AAB signé avec la clé de debug"; exit 1; fi
+          rm -f "$RUNNER_TEMP/mocam-upload.p12"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MOCAM-play
+          path: mobile/MocapCamPhone/MOCAM-play.aab
+
+  iphone:
+    if: inputs.plateforme != 'android'
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/MocapCamPhone/package-lock.json
+      - name: Secrets présents
+        env:
+          T: ${{ secrets.APPLE_TEAM_ID }}
+          K: ${{ secrets.ASC_KEY_ID }}
+          I: ${{ secrets.ASC_ISSUER_ID }}
+          P: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          [ -n "$T" ] && [ -n "$K" ] && [ -n "$I" ] && [ -n "$P" ] || { echo "::error::Secrets Apple manquants : voir docs/store/builds.md"; exit 1; }
+      - run: xcodebuild -version
+      - run: npm ci
+      - name: Numéro de build (toujours croissant)
+        env:
+          RUN: ${{ github.run_number }}
+        run: |
+          node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('app.json'));j.expo.ios.buildNumber=String(1000+Number(process.env.RUN));fs.writeFileSync('app.json',JSON.stringify(j,null,2));console.log('buildNumber',j.expo.ios.buildNumber,'version',j.expo.version)"
+      - run: npx expo prebuild --platform ios --no-install
+        env:
+          CI: 1
+      - name: Pods
+        working-directory: mobile/MocapCamPhone/ios
+        run: pod install
+      - name: Clé App Store Connect
+        env:
+          P: ${{ secrets.ASC_KEY_P8 }}
+        run: printf '%s\n' "$P" > "$RUNNER_TEMP/AuthKey.p8"
+      - name: Archive signée (certificats et profils gérés par Apple)
+        working-directory: mobile/MocapCamPhone/ios
+        env:
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          KID: ${{ secrets.ASC_KEY_ID }}
+          ISS: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -o pipefail
+          xcodebuild -workspace MOCAM.xcworkspace -scheme MOCAM -configuration Release \
+            -sdk iphoneos -destination "generic/platform=iOS" \
+            -archivePath "$PWD/build/MOCAM.xcarchive" archive \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "$KID" -authenticationKeyIssuerID "$ISS" \
+            DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic > build.log 2>&1 \
+            || { grep -E "error:|\*\* ARCHIVE" -A3 build.log | head -n 120; exit 1; }
+          tail -n 20 build.log
+      - name: Envoi vers App Store Connect
+        working-directory: mobile/MocapCamPhone/ios
+        env:
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          KID: ${{ secrets.ASC_KEY_ID }}
+          ISS: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          cat > ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$TEAM</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          EOF
+          set -o pipefail
+          xcodebuild -exportArchive -archivePath "$PWD/build/MOCAM.xcarchive" \
+            -exportOptionsPlist ExportOptions.plist -exportPath "$PWD/build/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "$KID" -authenticationKeyIssuerID "$ISS" 2>&1 | tail -n 40
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
