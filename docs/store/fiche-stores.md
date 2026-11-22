@@ -124,6 +124,6 @@ Motion capture with your phones: body and face, FBX export on your PC.
 | `play-banniere-1024x500.png` | Google Play (image de présentation) |
 
 **Captures d'écran à fournir :**
-* App Store : iPhone 6,9 pouces (1320 × 2868 ou 2868 × 1320), de 3 à 10 images. Si l'app
-  reste disponible sur iPad, aussi iPad 13 pouces (2064 × 2752).
+* App Store : iPhone 6,9 pouces (1320 × 2868 ou 2868 × 1320), de 3 à 10 images (app pour
+  iPhone seulement, pas d'iPad).
 * Google Play : téléphone, de 2 à 8 images, côtés entre 320 et 3840 px, format 16:9 ou 9:16.
