@@ -134,7 +134,7 @@ jobs:
             DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic > build.log 2>&1 \
             || { grep -E "error:|\*\* ARCHIVE" -A3 build.log | head -n 120; exit 1; }
           tail -n 20 build.log
-      - name: Envoi vers App Store Connect
+      - name: Export de l'IPA signée
         working-directory: mobile/MocapCamPhone/ios
         env:
           TEAM: ${{ secrets.APPLE_TEAM_ID }}
@@ -146,7 +146,7 @@ jobs:
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0"><dict>
             <key>method</key><string>app-store-connect</string>
-            <key>destination</key><string>upload</string>
+            <key>destination</key><string>export</string>
             <key>teamID</key><string>$TEAM</string>
             <key>signingStyle</key><string>automatic</string>
             <key>uploadSymbols</key><true/>
@@ -159,4 +159,25 @@ jobs:
             -allowProvisioningUpdates \
             -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
             -authenticationKeyID "$KID" -authenticationKeyIssuerID "$ISS" 2>&1 | tail -n 40
-          rm -f "$RUNNER_TEMP/AuthKey.p8"
+          ls -la build/export
+          cp build/export/*.ipa ../MOCAM-appstore.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MOCAM-appstore
+          path: mobile/MocapCamPhone/MOCAM-appstore.ipa
+      - name: Envoi vers App Store Connect
+        env:
+          KID: ${{ secrets.ASC_KEY_ID }}
+          ISS: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          mv "$RUNNER_TEMP/AuthKey.p8" ~/.appstoreconnect/private_keys/AuthKey_$KID.p8
+          set +e
+          xcrun altool --upload-app --type ios --file MOCAM-appstore.ipa \
+            --apiKey "$KID" --apiIssuer "$ISS" --output-format normal 2>&1 | tee upload.log
+          code=${PIPESTATUS[0]}
+          rm -f ~/.appstoreconnect/private_keys/AuthKey_$KID.p8
+          if [ $code -ne 0 ] || grep -qiE "error|failed" upload.log; then
+            echo "::error::Envoi refusé par App Store Connect (voir le message ci-dessus). L'IPA signée reste téléchargeable dans Artifacts > MOCAM-appstore."
+            exit 1
+          fi
