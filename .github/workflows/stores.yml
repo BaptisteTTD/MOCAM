@@ -177,7 +177,7 @@ jobs:
             --apiKey "$KID" --apiIssuer "$ISS" --output-format normal 2>&1 | tee upload.log
           code=${PIPESTATUS[0]}
           rm -f ~/.appstoreconnect/private_keys/AuthKey_$KID.p8
-          if [ $code -ne 0 ] || grep -qiE "error|failed" upload.log; then
+          if [ $code -ne 0 ] || ! grep -q "UPLOAD SUCCEEDED" upload.log; then
             echo "::error::Envoi refusé par App Store Connect (voir le message ci-dessus). L'IPA signée reste téléchargeable dans Artifacts > MOCAM-appstore."
             exit 1
           fi
