@@ -14,6 +14,7 @@ import {
 } from 'react-native'
 import { useKeepAwake } from 'expo-keep-awake'
 import * as ScreenOrientation from 'expo-screen-orientation'
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { createSynchronizable, scheduleOnRN } from 'react-native-worklets'
 import * as Battery from 'expo-battery'
 import { File, Paths, UploadType } from 'expo-file-system'
@@ -52,7 +53,7 @@ import {
   type Settings,
 } from './src/settings'
 
-const APP_VERSION = '1.8.0'
+const APP_VERSION = '1.9.0'
 
 // Erreurs hors affichage (minuteries, callbacks natifs) : on les montre à l'écran
 // au lieu de laisser l'app se fermer.
@@ -76,9 +77,11 @@ export default function App() {
     void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {})
   }, [])
   return (
-    <ErrorBoundary>
-      <AppInner />
-    </ErrorBoundary>
+    <SafeAreaProvider>
+      <ErrorBoundary>
+        <AppInner />
+      </ErrorBoundary>
+    </SafeAreaProvider>
   )
 }
 
@@ -326,6 +329,8 @@ function CaptureScreen({
   const [facing, setFacing] = useState<'back' | 'front'>('back')
   // mode Visage (caméra avant) : l'écran passe en portrait, la vidéo est verticale et à l'endroit
   const faceMode = facing === 'front'
+  // barres du système (boutons de navigation Android, encoche) : l'interface reste au-dessus
+  const insets = useSafeAreaInsets()
   const faceModeRef = useRef(faceMode)
   faceModeRef.current = faceMode
   useEffect(() => {
@@ -992,7 +997,7 @@ function CaptureScreen({
         : null}
       {guide ? <View pointerEvents="none" style={[styles.frameGuide, guide.frame]} /> : null}
 
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, { paddingTop: 8 + (faceMode ? Math.max(insets.top, 28) : insets.top), paddingLeft: 16 + insets.left, paddingRight: 16 + insets.right }]}>
         <View style={[styles.dot, { backgroundColor: connColor }]} />
         <Text style={styles.camName}>{settings.name}</Text>
         <Text style={styles.small}>
@@ -1007,8 +1012,14 @@ function CaptureScreen({
         ) : null}
       </View>
 
-      <View style={styles.bottomBar}>
-        {lensSetup.options.length < 2 ? (
+      <View
+        style={[
+          styles.bottomBar,
+          { paddingBottom: 6 + insets.bottom, paddingLeft: 16 + insets.left, paddingRight: 16 + insets.right },
+          faceMode ? styles.bottomBarFace : null,
+        ]}
+      >
+        {lensSetup.options.length < 2 && !faceMode ? (
           <Pressable
             onPress={() => {
               if (lensSetup.used === 'front') return
@@ -1039,7 +1050,7 @@ function CaptureScreen({
           {camStatus.fps ? `${camStatus.fps} ${t('i/s', 'fps')}` : `… ${t('i/s', 'fps')}`}
           {locked ? t('   exposition bloquée', '   exposure locked') : ''}
         </Text>
-        <View style={{ flex: 1 }} />
+        {faceMode ? null : <View style={{ flex: 1 }} />}
         {upload ? <Text style={styles.small}>{t('Envoi', 'Sending')} {Math.round(upload.pct * 100)} %</Text> : null}
         <Pressable
           disabled={!!recording}
@@ -1060,7 +1071,7 @@ function CaptureScreen({
       </View>
 
       {faceMode ? (
-        <View style={styles.faceRecWrap} pointerEvents="box-none">
+        <View style={[styles.faceRecWrap, { bottom: 120 + insets.bottom }]} pointerEvents="box-none">
           <Pressable
             accessibilityLabel={recording ? t("Arrêter l'enregistrement du visage", 'Stop recording the face') : t('Enregistrer le visage', 'Record the face')}
             disabled={conn.state !== 'connected' || (!recording && !!upload)}
@@ -1210,7 +1221,8 @@ const styles = StyleSheet.create({
   recDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#ff3b30' },
   link: { color: '#5aa9ff', fontSize: 13, marginTop: 12, textDecorationLine: 'underline' },
   faceOn: { borderColor: '#3ddc84', backgroundColor: '#3ddc8433' },
-  faceRecWrap: { position: 'absolute', left: 0, right: 0, bottom: 96, alignItems: 'center', gap: 8 },
+  faceRecWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center', gap: 8 },
+  bottomBarFace: { flexWrap: 'wrap', justifyContent: 'center', rowGap: 8, paddingTop: 10 },
   faceRec: {
     width: 76, height: 76, borderRadius: 38, borderWidth: 4, borderColor: '#fff',
     alignItems: 'center', justifyContent: 'center', backgroundColor: '#0006',
