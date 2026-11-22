@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Image as RNImage,
+  Linking,
   Platform,
   Pressable,
   StyleSheet,
@@ -50,7 +51,7 @@ import {
   type Settings,
 } from './src/settings'
 
-const APP_VERSION = '1.5.0'
+const APP_VERSION = '1.6.0'
 
 // Erreurs hors affichage (minuteries, callbacks natifs) : on les montre à l'écran
 // au lieu de laisser l'app se fermer.
@@ -63,6 +64,8 @@ if (g.ErrorUtils?.setGlobalHandler) {
   })
 }
 const QR_TYPES: ScannedObjectType[] = ['qr']
+/** Dernière version de MOCAM Studio.exe (page Releases du dépôt GitHub). */
+const STUDIO_DOWNLOAD_URL = 'https://github.com/BaptisteTTD/MOCAM/releases/latest'
 
 // ============================================================================ App
 
@@ -208,6 +211,9 @@ function ConnectScreen({
           onEndEditing={() => onSettings({ ...settings, name: cleanName(settings.name) })}
         />
         <Text style={styles.small}>Il donne son nom à la vidéo : iphone, poco…</Text>
+        <Pressable accessibilityRole="link" onPress={() => void Linking.openURL(STUDIO_DOWNLOAD_URL)} hitSlop={8}>
+          <Text style={styles.link}>Télécharger MOCAM Studio pour le PC (Windows)</Text>
+        </Pressable>
         <Text style={[styles.small, { marginTop: 18, color: '#aab' }]}>
           Le téléphone et le PC doivent être sur le même Wi-Fi. Sans Wi-Fi, activez le partage de connexion
           d'un des téléphones et connectez-y le PC : ce téléphone peut filmer lui aussi.
@@ -1150,6 +1156,7 @@ const styles = StyleSheet.create({
   camName: { color: '#fff', fontSize: 20, fontWeight: '700' },
   rec: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   recDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#ff3b30' },
+  link: { color: '#5aa9ff', fontSize: 13, marginTop: 12, textDecorationLine: 'underline' },
   faceOn: { borderColor: '#3ddc84', backgroundColor: '#3ddc8433' },
   faceRecWrap: { position: 'absolute', left: 0, right: 0, bottom: 96, alignItems: 'center', gap: 8 },
   faceRec: {
