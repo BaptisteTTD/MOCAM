@@ -27,6 +27,13 @@ jobs:
         with:
           python-version: "3.13"      # version exigée par bpy (Blender intégré)
           cache: pip
+      - name: Même version pour le serveur et l'interface
+        shell: bash
+        run: |
+          srv=$(grep -oP 'STUDIO_VERSION = "\K[0-9.]+' mocapcam/studio_server.py)
+          ui=$(grep -oP "const UI_VERSION = '\K[0-9.]+" mocapcam/studio_ui/index.html)
+          echo "serveur $srv, interface $ui"
+          [ "$srv" = "$ui" ] || { echo "::error::UI_VERSION ($ui) différente de STUDIO_VERSION ($srv)"; exit 1; }
       - name: Dépendances
         run: |
           python -m pip install --upgrade pip
