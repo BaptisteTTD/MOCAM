@@ -8,7 +8,10 @@ est animé par défaut après chaque traitement (tant qu'aucun autre personnage 
 Personnage par défaut prévu : Y Bot de Mixamo.
   1. Sur https://www.mixamo.com, onglet Characters, choisissez « Y Bot ».
   2. Download, format FBX Binary, Pose : T-pose.
-  3. Posez le fichier ici sous le nom YBot.fbx, puis relancez MOCAM Studio.
+  3. Posez le fichier sous le nom YBot.fbx, puis relancez MOCAM Studio :
+     - dans Documents\MOCAM\personnages_fournis (conseillé : il reste là quand vous
+       installez une nouvelle version de MOCAM Studio) ;
+     - ou ici, à côté de MOCAM Studio.exe.
 
 Ces fichiers ne sont pas publiés sur GitHub : les personnages Mixamo peuvent être utilisés
 librement dans vos projets, mais pas redistribués tels quels.

@@ -398,6 +398,9 @@ def get_character(studio_dir, cid):
 # installés tout seuls dans studio/personnages/ et animés par défaut. Ce dossier n'est pas
 # publié sur GitHub (les fichiers Mixamo ne peuvent pas être redistribués tels quels).
 BUNDLED_DIR = os.path.join(ROOT, "personnages_fournis")
+# même chose dans les Documents de l'utilisateur : ce dossier ne bouge pas quand on installe une
+# nouvelle version de MOCAM Studio.exe (dézippée ailleurs), le personnage par défaut reste donc là
+USER_BUNDLED_DIR = os.path.join(os.path.expanduser("~"), "Documents", "MOCAM", "personnages_fournis")
 MODEL_EXTS = (".fbx", ".glb", ".gltf", ".blend")
 
 
@@ -425,16 +428,23 @@ def default_character(studio_dir, cfg):
 def install_bundled_characters(studio_dir, blender=None, log=print, bundled_dir=None):
     """Installe les personnages du dossier personnages_fournis/ (une fois) et les marque
     « fournis ». Renvoie les identifiants installés ou mis à jour."""
-    src_dir = bundled_dir or BUNDLED_DIR
-    if not os.path.isdir(src_dir):
+    dirs = [bundled_dir] if bundled_dir else [BUNDLED_DIR, USER_BUNDLED_DIR]
+    files, seen = [], set()
+    for src_dir in dirs:
+        if not os.path.isdir(src_dir):
+            continue
+        for fn in sorted(os.listdir(src_dir)):
+            stem, ext = os.path.splitext(fn)
+            if ext.lower() in MODEL_EXTS and character_id(stem) not in seen:
+                seen.add(character_id(stem))
+                files.append((src_dir, fn))
+    if not files:
         return []
     root = characters_dir(studio_dir)
     os.makedirs(root, exist_ok=True)
     done = []
-    for fn in sorted(os.listdir(src_dir)):
+    for src_dir, fn in files:
         stem, ext = os.path.splitext(fn)
-        if ext.lower() not in MODEL_EXTS:
-            continue
         cid = character_id(stem)
         d = os.path.join(root, cid)
         mf = os.path.join(d, "personnage.json")
