@@ -86,9 +86,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="studio-v${STUDIO_VERSION}"
-          if gh release view "$tag" > /dev/null 2>&1; then
-            gh release upload "$tag" MOCAM-Studio-Windows.zip --clobber
-          else
-            gh release create "$tag" MOCAM-Studio-Windows.zip --title "MOCAM Studio ${STUDIO_VERSION} (Windows)" \
-              --notes "Décompressez, puis lancez MOCAM Studio.exe (rien d'autre à installer). Voir LISEZMOI.txt."
-          fi
+          # GitHub répond parfois « HTTP 500 » : jusqu'à 4 essais
+          for essai in 1 2 3 4; do
+            if gh release view "$tag" > /dev/null 2>&1; then
+              gh release upload "$tag" MOCAM-Studio-Windows.zip --clobber && exit 0
+            else
+              gh release create "$tag" MOCAM-Studio-Windows.zip --title "MOCAM Studio ${STUDIO_VERSION} (Windows)" \
+                --notes "Décompressez, puis lancez MOCAM Studio.exe (rien d'autre à installer). Voir LISEZMOI.txt." && exit 0
+            fi
+            echo "échec de la publication (essai $essai), nouvel essai dans 30 s"; sleep 30
+          done
+          exit 1
