@@ -99,6 +99,8 @@ en **carré**, de 1,5 à 3 m de côté selon la pièce, plus une boule au milieu
    A rouge ─────────────── B verte
 ```
 
+* Le même schéma, avec les caméras, est affiché dans Studio (onglet **Tournage**, colonne de droite,
+  *Placer les boules au sol*).
 * Seule **la forme** compte : quatre côtés égaux et **deux diagonales égales** (vérifiez au
   mètre ruban). E doit être pile au milieu de A-D. 2 à 3 cm d'erreur, c'est bon.
 * Pas besoin de mesurer le côté : **l'échelle vient de la taille de l'acteur**, que vous

@@ -5,6 +5,21 @@
 //   frags    : derniers recours, morceaux remplacés dans un texte non reconnu
 window.MOCAM_I18N = {
 exact: {
+  // ------------------------------------------------------------ schéma des boules au sol
+  'Placer les boules au sol': 'Placing the floor balls', 'Vue de dessus': 'Top view',
+  'Schéma vu de dessus : boules au sol, acteur et caméras': 'Top-view diagram: floor balls, actor and cameras',
+  '1,5 à 3 m': '1.5 to 3 m', 'acteur': 'actor', '70 à 90°': '70 to 90°', 'milieu': 'middle',
+  'Caméra 1': 'Camera 1', 'Caméra 2': 'Camera 2', '3 à 4 m du centre': '3 to 4 m from the centre',
+  'trépieds à 1,2 – 1,5 m de haut': 'tripods 1.2 – 1.5 m high', "(schéma pas à l'échelle)": '(not to scale)',
+  'Collez A (rouge) dans un coin, puis B (verte), C (bleue) et D (jaune) en tournant dans le sens des flèches.':
+    'Stick A (red) in a corner, then B (green), C (blue) and D (yellow), going round in the direction of the arrows.',
+  'Mettez E (rouge) pile au milieu entre A et D.': 'Put E (red) exactly halfway between A and D.',
+  "Quatre côtés égaux, de 1,5 à 3 m, et deux diagonales égales : vérifiez au mètre ruban, 2 à 3 cm d'erreur suffisent.":
+    'Four equal sides, 1.5 to 3 m long, and two equal diagonals: check with a tape measure, 2 to 3 cm of error is fine.',
+  "Placez les caméras du côté A–B, l'acteur tourné vers elles.": 'Place the cameras on the A–B side, with the actor facing them.',
+  'Cliquez sur Vérifier : chaque caméra doit voir au moins 4 boules.': 'Click Check: every camera must see at least 4 balls.',
+  "Demi-boules côté plat au sol, tenues par de l'adhésif double face. Si deux couleurs sont échangées ou le carré monté à l'envers, le traitement le détecte et le corrige.":
+    'Half-balls flat side down, held with double-sided tape. If two colours are swapped or the square is laid out the wrong way round, processing detects and corrects it.',
   // ------------------------------------------------------------ en-tête, onglets, réglages
   'Tournage': 'Shoot', 'Prises': 'Takes', 'Visage': 'Face', 'Personnages': 'Characters',
   'Réglages': 'Settings', 'Vidéo': 'Video', 'Réseau': 'Network', 'Dossiers': 'Folders',
