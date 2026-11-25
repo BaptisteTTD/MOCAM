@@ -2,7 +2,7 @@
   "expo": {
     "name": "MOCAM",
     "slug": "mocapcam-phone",
-    "version": "1.9.0",
+    "version": "1.9.1",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",

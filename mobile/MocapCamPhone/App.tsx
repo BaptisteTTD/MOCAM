@@ -53,7 +53,7 @@ import {
   type Settings,
 } from './src/settings'
 
-const APP_VERSION = '1.9.0'
+const APP_VERSION = '1.9.1'
 
 // Erreurs hors affichage (minuteries, callbacks natifs) : on les montre à l'écran
 // au lieu de laisser l'app se fermer.
@@ -977,10 +977,16 @@ function CaptureScreen({
             const msg = String(e?.message ?? e)
             // passager : la caméra n'a pas encore démarré (connexion, changement d'objectif)
             if (/not active|not (yet )?(started|initialized|ready)/i.test(msg)) return
-            if (lensSetup.used === 'ultra' && device.id !== defaultBack?.id) {
-              setUltraBroken(device.id)       // objectif refusé : retour à ×1, sans insister
-              flash(t("Cet objectif n'est pas accessible aux apps sur ce téléphone : retour à ×1",
-                      "This lens isn't available to apps on this phone: back to ×1"))
+            // pendant un changement d'objectif, l'iPhone signale souvent une erreur passagère
+            // alors que l'ultra grand-angle démarre bien : on ne l'écarte jamais sur iPhone
+            if (/interrupt|reconfigur|in progress|already|busy|recoverable/i.test(msg)) return
+            // Android seulement : certains téléphones listent un objectif sans le prêter aux apps.
+            // On ne l'écarte que s'il refuse vraiment de s'ouvrir (pas pour une erreur de réglage).
+            if (Platform.OS === 'android' && lensSetup.used === 'ultra' && device.id !== defaultBack?.id &&
+                /no.?device|invalid.?device|not.?(found|available|supported)|disconnect|denied|camera.?(in.?use|error)/i.test(msg)) {
+              setUltraBroken(device.id)
+              flash(t(`Cet objectif n'est pas accessible aux apps sur ce téléphone : retour à ×1 (${msg.split('\n')[0]})`,
+                      `This lens isn't available to apps on this phone: back to ×1 (${msg.split('\n')[0]})`))
               return
             }
             flash(t(`Caméra : ${msg.split('\n')[0]}`, `Camera: ${msg.split('\n')[0]}`))
