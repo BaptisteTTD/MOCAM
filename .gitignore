@@ -16,9 +16,11 @@ mobile/MocapCamPhone/android/
 mobile/MocapCamPhone/ios/
 mobile/MocapCamPhone/.expo/
 
-# Personnages fournis (ex. Y Bot de Mixamo) : fichiers locaux, non redistribuables tels quels
+# Personnages fournis : MOCAM Bot est publié ; les autres (ex. Y Bot de Mixamo) restent locaux,
+# car non redistribuables tels quels
 personnages_fournis/*
 !personnages_fournis/LISEZMOI.txt
+!personnages_fournis/MOCAM_Bot.glb
 
 # modèles téléchargés (MediaPipe…)
 modeles/

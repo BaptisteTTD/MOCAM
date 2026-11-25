@@ -5,7 +5,9 @@ Les fichiers de personnage riggé posés dans ce dossier (FBX, GLB/glTF ou .blen
 tout seuls dans MOCAM Studio au démarrage, marqués « Fourni avec MOCAM », et le premier
 est animé par défaut après chaque traitement (tant qu'aucun autre personnage n'est choisi).
 
-Personnage par défaut prévu : Y Bot de Mixamo.
+Personnage par défaut : MOCAM Bot (MOCAM_Bot.glb), livré avec MOCAM Studio.
+
+Vous pouvez en ajouter d'autres, par exemple Y Bot de Mixamo :
   1. Sur https://www.mixamo.com, onglet Characters, choisissez « Y Bot ».
   2. Download, format FBX Binary, Pose : T-pose.
   3. Posez le fichier sous le nom YBot.fbx, puis relancez MOCAM Studio :
@@ -13,5 +15,5 @@ Personnage par défaut prévu : Y Bot de Mixamo.
        installez une nouvelle version de MOCAM Studio) ;
      - ou ici, à côté de MOCAM Studio.exe.
 
-Ces fichiers ne sont pas publiés sur GitHub : les personnages Mixamo peuvent être utilisés
+Y Bot n'est pas publié avec MOCAM : les personnages Mixamo peuvent être utilisés
 librement dans vos projets, mais pas redistribués tels quels.

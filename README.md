@@ -19,7 +19,7 @@ MOCAM, c'est deux choses :
 | **MOCAM Studio** (PC Windows) | Connecte les téléphones, lance l'enregistrement, traite les prises et montre le résultat en 3D sur votre personnage. Capture aussi le visage (52 blendshapes ARKit) avec une seule caméra. |
 
 Ce que vous obtenez pour chaque prise :
-* `prise_XXX_ybot.fbx` : l'animation sur **Y Bot** (ou sur votre personnage), maillage compris ;
+* `prise_XXX_mocam_bot.fbx` : l'animation sur **MOCAM Bot** (ou sur votre personnage), maillage compris ;
 * `prise_XXX.fbx` : le **squelette seul**, au format Mixamo (65 os), aux proportions et à la
   taille réelles de l'acteur.
 
@@ -209,9 +209,9 @@ pouvez filmer d'autres prises pendant ce temps : elles attendent leur tour.
 
 ### Étape 7 : regarder le résultat
 
-![Prise traitée, aperçu 3D sur Y Bot](docs/tuto/08_prise_traitee.png)
+![Prise traitée, aperçu 3D sur le personnage](docs/tuto/08_prise_traitee.png)
 
-* L'**aperçu 3D** montre l'animation sur **Y Bot** (ou sur vos personnages animés, bouton
+* L'**aperçu 3D** montre l'animation sur **MOCAM Bot** (ou sur vos personnages animés, bouton
   *Afficher*). Lecture, pause, et image par image avec le curseur. Tournez autour à la souris.
 * **Taille de l'acteur** : une erreur ? Tapez la bonne taille, puis **Appliquer**. C'est
   immédiat, sans retraiter : les FBX sont refaits.
@@ -225,7 +225,7 @@ pouvez filmer d'autres prises pendant ce temps : elles attendent leur tour.
 
 ![Onglet Personnages](docs/tuto/09_personnages.png)
 
-Par défaut, chaque prise est animée sur **Y Bot**, le personnage Mixamo fourni. Pour animer
+Par défaut, chaque prise est animée sur **MOCAM Bot**, le personnage livré avec MOCAM Studio. Pour animer
 le vôtre :
 
 1. Onglet **Personnages** : donnez un nom, puis glissez le fichier de votre personnage riggé
@@ -233,15 +233,16 @@ le vôtre :
 2. Studio l'analyse et affiche sa vignette et le squelette reconnu : **Mixamo, Unreal,
    Character Creator, Biped, VRoid, DAZ, Rigify**, ou des noms d'os courants. Les doigts sont
    animés s'il en a.
-3. **Utiliser par défaut** : il remplace Y Bot, et chaque nouvelle prise est animée dessus.
+3. **Utiliser par défaut** : il remplace MOCAM Bot, et chaque nouvelle prise est animée dessus.
    Pour les prises déjà traitées : onglet *Prises* > *Animer un personnage* > **Animer**.
 
 Le personnage garde son maillage, ses matériaux et ses proportions : seule l'animation est
 ajoutée.
 
-> Y Bot est installé depuis le dossier `personnages_fournis\`. Il n'est pas publié sur GitHub
-> (Mixamo interdit de redistribuer ses fichiers tels quels) : le fichier `LISEZMOI.txt` de ce
-> dossier explique comment le retélécharger.
+> MOCAM Bot est installé tout seul depuis le dossier `personnages_fournis\` de MOCAM Studio.
+> D'autres personnages posés dans ce dossier, ou dans `Documents\MOCAM\personnages_fournis\`,
+> sont installés de la même façon (par exemple Y Bot de Mixamo, que MOCAM ne peut pas
+> redistribuer : voir `LISEZMOI.txt`).
 
 ### Les réglages
 
@@ -310,7 +311,7 @@ Dans `captures\prise_XXX\` :
 
 | Fichier | Contenu |
 |---|---|
-| `prise_XXX_ybot.fbx` | Y Bot (ou votre personnage) animé, maillage compris |
+| `prise_XXX_mocam_bot.fbx` | MOCAM Bot (ou votre personnage) animé, maillage compris |
 | `prise_XXX.fbx` | le squelette seul : 65 os Mixamo, proportions de l'acteur, corps et doigts, 60 images/s, pose de repos en T-pose |
 
 Le squelette seul est l'équivalent d'une animation Mixamo téléchargée « sans skin ». Tout outil
@@ -324,7 +325,7 @@ qui accepte les animations Mixamo sait l'utiliser.
 
 ### Blender
 
-*Fichier > Importer > FBX* : `prise_XXX_ybot.fbx` (ou votre personnage) arrive animé, prêt à
+*Fichier > Importer > FBX* : `prise_XXX_mocam_bot.fbx` (ou votre personnage) arrive animé, prêt à
 l'emploi. Pour animer un autre personnage, ajoutez-le dans l'onglet **Personnages** de
 MOCAM Studio (Mixamo, Unreal, Character Creator, Biped, DAZ, VRoid, Rigify…) : le transfert
 est fait pour vous.

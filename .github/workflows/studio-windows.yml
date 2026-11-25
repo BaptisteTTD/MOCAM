@@ -46,6 +46,7 @@ jobs:
           $d = "dist/MOCAM Studio"
           New-Item -ItemType Directory "$d/personnages_fournis" -Force | Out-Null
           Copy-Item personnages_fournis/LISEZMOI.txt "$d/personnages_fournis/"
+          Copy-Item personnages_fournis/MOCAM_Bot.glb "$d/personnages_fournis/"
           Copy-Item packaging/LISEZMOI.txt "$d/"
       - name: Vérification (modèles, ffmpeg, Blender intégré, démarrage du Studio)
         shell: pwsh

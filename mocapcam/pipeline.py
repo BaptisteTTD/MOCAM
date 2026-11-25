@@ -29,7 +29,7 @@ DEFAULT_STUDIO = {
     "volume": {"margin": 0.5, "height": 2.3},
     # taille de l'acteur (cm) : le squelette exporté est mis à cette taille (vide = échelle des boules)
     "actor_height_cm": None,
-    "character": "",        # personnage animé après chaque traitement (studio/personnages/<id>) ; vide : le fourni (Y Bot)
+    "character": "",        # personnage animé après chaque traitement (studio/personnages/<id>) ; vide : MOCAM Bot
     "blender": "",          # chemin de blender.exe pour l'export FBX (vide = recherche automatique)
     "fbx": True,            # créer <prise>.fbx (squelette Mixamo animé) après le traitement
     "sync_by_motion": True,  # affiner la synchro du bip avec le mouvement de l'acteur
@@ -402,6 +402,8 @@ BUNDLED_DIR = os.path.join(ROOT, "personnages_fournis")
 # nouvelle version de MOCAM Studio.exe (dézippée ailleurs), le personnage par défaut reste donc là
 USER_BUNDLED_DIR = os.path.join(os.path.expanduser("~"), "Documents", "MOCAM", "personnages_fournis")
 MODEL_EXTS = (".fbx", ".glb", ".gltf", ".blend")
+# personnage natif de MOCAM, livré avec MOCAM Studio.exe et animé par défaut
+NATIVE_CHARACTER = "mocam_bot"
 
 
 def character_id(name):
@@ -417,12 +419,16 @@ def _pretty_name(stem):
 
 def default_character(studio_dir, cfg):
     """Personnage animé après chaque traitement : celui choisi dans Studio, sinon le premier
-    personnage fourni (Y Bot), sinon aucun (le squelette seul est exporté)."""
+    personnage natif (MOCAM Bot), sinon un autre personnage fourni, sinon aucun (le squelette
+    seul est exporté)."""
     chars = list_characters(studio_dir)
     cid = (cfg or {}).get("character") or ""
     if any(c["id"] == cid for c in chars):
         return cid
-    return next((c["id"] for c in chars if c.get("builtin")), "")
+    builtin = [c["id"] for c in chars if c.get("builtin")]
+    if NATIVE_CHARACTER in builtin:
+        return NATIVE_CHARACTER
+    return builtin[0] if builtin else ""
 
 
 def install_bundled_characters(studio_dir, blender=None, log=print, bundled_dir=None):

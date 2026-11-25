@@ -493,7 +493,7 @@ function setLang(l) { try { localStorage.setItem('mocam-lang', l); } catch (e) {
 <script>
 let ws, S = null, serverDelta = 0, takeTyped = false, selTake = null, logText = '';
 const autoAnimated = new Set();   // prises où le personnage par défaut a été lancé automatiquement
-const UI_VERSION = '1.11.2';   // doit correspondre à STUDIO_VERSION (studio_server.py)
+const UI_VERSION = '1.12.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
 function newerVersion(a, b) {
   const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
   for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
@@ -902,7 +902,7 @@ function renderChars() {
   const key = JSON.stringify([S.characters, S.character]);
   if (key === charsKey) return;
   charsKey = key;
-  // personnage par défaut d'abord (Y Bot fourni), puis les fournis, puis les autres
+  // personnage par défaut d'abord (MOCAM Bot fourni), puis les fournis, puis les autres
   const chars = [...S.characters].sort((a, b) => (b.id === S.character) - (a.id === S.character) || (!!b.builtin) - (!!a.builtin));
   $('charGrid').innerHTML = (chars.length ? '' : '<p class="hint">Aucun personnage : importez un modèle riggé ci-dessus. Le squelette seul (prise_XXX.fbx) est exporté dans tous les cas.</p>') + chars.map(c => {
     const i = c.info || {};
