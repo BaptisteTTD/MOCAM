@@ -493,7 +493,7 @@ function setLang(l) { try { localStorage.setItem('mocam-lang', l); } catch (e) {
 <script>
 let ws, S = null, serverDelta = 0, takeTyped = false, selTake = null, logText = '';
 const autoAnimated = new Set();   // prises où le personnage par défaut a été lancé automatiquement
-const UI_VERSION = '1.13.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
+const UI_VERSION = '1.14.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
 function newerVersion(a, b) {
   const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
   for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);

@@ -18,6 +18,7 @@ DEFAULT_STUDIO = {
     "cameras": ["iphone", "poco"],
     "fps": 60,
     "output_fps": 30,     # cadence des animations exportées (FBX corps et visage)
+    "face_front": True,   # tourner la prise pour que l'acteur regarde vers -Y (l'avant de Blender)
     "max_height": 1080,
     "marker_height": 0.01,
     "markers": [
@@ -271,6 +272,45 @@ def scale_world(X, cams, vol, s):
         c["center"] = [float(v) * s for v in c["center"]]
     vol = (np.asarray(vol[0], float) * s, np.asarray(vol[1], float) * s)
     return X, cams, vol
+
+
+def facing_angle(X, fps, seconds=2.0):
+    """Direction (degrés, 0 = +X, -90 = -Y) vers laquelle regarde l'acteur au début de la prise,
+    tirée des épaules et des hanches (gauche -> droite). None si on ne peut pas la mesurer."""
+    L = (X[:, 5] + X[:, 11]) / 2
+    R = (X[:, 6] + X[:, 12]) / 2
+    v = R - L
+    f = np.stack([-v[:, 1], v[:, 0]], 1)                 # Z vers le haut x (gauche -> droite)
+    ok = np.isfinite(f).all(1) & (np.linalg.norm(f, axis=1) > 1e-3)
+    for n in (int(seconds * fps), len(f)):
+        sel = ok[:n]
+        if sel.sum() >= max(5, 0.2 * min(n, len(f))):
+            u = f[:n][sel] / np.linalg.norm(f[:n][sel], axis=1, keepdims=True)
+            m = u.mean(0)
+            if np.linalg.norm(m) > 0.3:                   # direction assez nette
+                return float(np.degrees(np.arctan2(m[1], m[0])))
+    return None
+
+
+def rotate_world(X, cams, vol, markers, deg, pivot):
+    """Tourne toute la scène de deg degrés autour de l'axe vertical passant par pivot (x, y)."""
+    a = np.radians(deg)
+    Q = np.array([[np.cos(a), -np.sin(a), 0.0], [np.sin(a), np.cos(a), 0.0], [0.0, 0.0, 1.0]])
+    p = np.array([pivot[0], pivot[1], 0.0])
+    X = (X - p) @ Q.T + p
+    for c in cams:
+        R = np.asarray(c["R"], float)
+        t = np.asarray(c["t"], float).reshape(3)
+        c["R"] = R @ Q.T
+        c["t"] = (t + R @ (p - Q.T @ p)).reshape(np.shape(c["t"]))
+        c["center"] = [float(v) for v in Q @ (np.asarray(c["center"], float) - p) + p]
+    corners = np.array([[x, y, z] for x in (vol[0][0], vol[1][0]) for y in (vol[0][1], vol[1][1])
+                        for z in (vol[0][2], vol[1][2])], float)
+    corners = (corners - p) @ Q.T + p
+    vol = (corners.min(0), corners.max(0))
+    markers = [dict(m, position_3d=[float(v) for v in Q @ (np.asarray(m["position_3d"], float) - p) + p])
+               for m in markers]
+    return X, cams, vol, markers
 
 
 def load_take_meta(take_dir):
@@ -686,6 +726,18 @@ def process_take(studio_dir, take_dir, force=False, manual_delays=None, only_cal
                 "MOCAM Studio : le squelette sera mis à la bonne taille.")
     stats["actor_height_m"] = h
     stats["start_time_s"] = round(first / fps, 4)
+    if cfg.get("face_front", True):
+        ang = facing_angle(X, fps)
+        if ang is not None:
+            turn = (-90.0 - ang + 180.0) % 360.0 - 180.0
+            if abs(turn) > 1.0:
+                hips = (X[:, 11] + X[:, 12]) / 2
+                okh = np.isfinite(hips).all(1)
+                pivot = hips[okh][0, :2] if okh.any() else np.zeros(2)
+                X, cams, vol, mk_rot = rotate_world(X, cams, vol, cfg["markers"], turn, pivot)
+                cfg = dict(cfg, markers=mk_rot)
+                log(f"  acteur tourné de {turn:+.0f}° : il regarde vers l'avant de Blender (-Y)")
+            stats["front_rotation_deg"] = round(turn, 1)
     out_fps = cfg.get("output_fps") or fps
     if abs(out_fps - fps) > 1e-6:
         X, fps = triangulate.resample_frames(X, fps, out_fps)

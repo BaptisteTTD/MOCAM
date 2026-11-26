@@ -251,6 +251,8 @@ ajoutée.
 * **Priorité à 60 images/s** : si un téléphone n'y arrive pas en 1080p, il passe en 720p.
   Les téléphones filment à 60 images/s pour un suivi précis ; les animations exportées (FBX du
   corps et du visage) sont à **30 images/s**.
+* **Orientation** : quelle que soit la place des caméras, la prise est tournée pour que l'acteur
+  regarde vers l'avant de Blender (-Y) au début de la prise, comme un personnage importé.
 * **Aperçu des caméras** : cadence des images en direct (à baisser si le Wi-Fi est faible).
 * **Réseau** : les adresses du PC, le bouton pare-feu, et **Nouveau QR code** : les téléphones
   déjà connectés le restent, les autres devront scanner le nouveau code.

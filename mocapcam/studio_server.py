@@ -36,7 +36,7 @@ from .paths import FROZEN, ROOT, say, self_command
 
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "studio_ui")
 # version du serveur : l'interface (index.html) vérifie qu'elle parle au serveur de la même version
-STUDIO_VERSION = "1.13.0"
+STUDIO_VERSION = "1.14.0"
 
 # horloge du PC en ms (monotone, calée sur l'heure système au démarrage)
 _EPOCH = time.time() * 1000 - time.monotonic() * 1000
