@@ -70,6 +70,12 @@ def main(argv=None):
     p.add_argument("--studio", default=os.path.join(ROOT, "studio"))
     p.add_argument("--blender", help="chemin de blender.exe (sinon studio.json ou recherche automatique)")
 
+    p = sub.add_parser("cadence", help="change la cadence (24, 30 ou 60 i/s) des FBX d'une prise")
+    p.add_argument("capture", help="dossier de la prise")
+    p.add_argument("fps", type=int, choices=(24, 30, 60))
+    p.add_argument("--studio", default=os.path.join(ROOT, "studio"))
+    p.add_argument("--blender")
+
     p = sub.add_parser("animer", help="anime un personnage riggé avec une prise traitée")
     p.add_argument("studio")
     p.add_argument("capture")
@@ -103,6 +109,9 @@ def main(argv=None):
         elif a.cmd == "taille":
             pipeline.rescale_take(a.capture, a.cm, blender=a.blender,
                                   studio_dir=a.studio if os.path.isdir(a.studio) else None)
+        elif a.cmd == "cadence":
+            pipeline.set_export_fps(a.capture, a.fps, studio_dir=a.studio if os.path.isdir(a.studio) else None,
+                                    blender=a.blender)
         elif a.cmd == "animer":
             pipeline.animate_character(a.capture, a.studio, a.personnage, blender=a.blender)
         elif a.cmd == "visage":

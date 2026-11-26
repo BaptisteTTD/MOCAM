@@ -250,7 +250,9 @@ ajoutée.
 
 * **Priorité à 60 images/s** : si un téléphone n'y arrive pas en 1080p, il passe en 720p.
   Les téléphones filment à 60 images/s pour un suivi précis ; les animations exportées (FBX du
-  corps et du visage) sont à **30 images/s**.
+  corps et du visage) sont à **30 images/s** par défaut, ou 24 / 60 au choix (réglage *Images/s du FBX*
+  de chaque prise : sur une prise déjà traitée, les FBX sont refaits en quelques secondes).
+* **Vidéos des caméras** : dans l'onglet Prises, revoyez les vidéos reçues avant de lancer le traitement.
 * **Orientation** : quelle que soit la place des caméras, la prise est tournée pour que l'acteur
   regarde vers l'avant de Blender (-Y) au début de la prise, comme un personnage importé.
 * **Aperçu des caméras** : cadence des images en direct (à baisser si le Wi-Fi est faible).

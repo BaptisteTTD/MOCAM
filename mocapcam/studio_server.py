@@ -36,7 +36,7 @@ from .paths import FROZEN, ROOT, say, self_command
 
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "studio_ui")
 # version du serveur : l'interface (index.html) vérifie qu'elle parle au serveur de la même version
-STUDIO_VERSION = "1.14.0"
+STUDIO_VERSION = "1.15.0"
 
 # horloge du PC en ms (monotone, calée sur l'heure système au démarrage)
 _EPOCH = time.time() * 1000 - time.monotonic() * 1000
@@ -44,6 +44,27 @@ _EPOCH = time.time() * 1000 - time.monotonic() * 1000
 
 def now_ms():
     return _EPOCH + time.monotonic() * 1000
+
+
+def make_preview_video(src, out):
+    """Copie légère d'une vidéo de prise, lisible partout (H.264, 720p max, 30 i/s, son AAC)."""
+    from . import video as videomod
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    tmp = out + ".part.mp4"
+    cmd = [videomod.ffmpeg_exe(), "-y", "-loglevel", "error", "-i", src,
+           "-vf", "scale=-2:'min(720,ih)',fps=30", "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
+           "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", tmp]
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=600,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if r.returncode == 0 and os.path.getsize(tmp) > 0:
+            os.replace(tmp, out)
+            return True
+    except (OSError, subprocess.SubprocessError):
+        pass
+    if os.path.exists(tmp):
+        os.remove(tmp)
+    return False
 
 
 def safe_name(s, default="x"):
@@ -323,6 +344,7 @@ class Studio:
     # ------------------------------------------------------------------ état -> interface
     def takes_list(self):
         out = []
+        cfg_fps = int(self.cfg().get("output_fps") or 30)
         for d in sorted(os.listdir(self.captures_dir), reverse=True):
             p = os.path.join(self.captures_dir, d)
             if not os.path.isdir(p) or d.startswith("_"):
@@ -356,7 +378,8 @@ class Studio:
                             fbx=os.path.exists(fbx_file), height_cm=height, measured_cm=measured,
                             characters=[c[len(d) + 1:-4] for c in chars],
                             preview=os.path.exists(os.path.join(p, "mocapcam", f"{d}.mocap.json")),
-                            created=meta.get("created"), duration=meta.get("duration_s")))
+                            created=meta.get("created"), duration=meta.get("duration_s"),
+                            export_fps=int(meta.get("export_fps") or cfg_fps)))
         return out[:60]
 
     def faces_list(self):
@@ -376,7 +399,8 @@ class Studio:
                             processed=os.path.exists(facemod.curves_path(p)), fbx=os.path.exists(o["fbx"]),
                             glb=os.path.exists(o["glb"]), frames=meta.get("frames"), fps=meta.get("fps"),
                             view=os.path.getmtime(o["view"]) if os.path.exists(o["view"]) else 0,
-                            lissage=meta.get("lissage", "moyen"), intensite=meta.get("intensite", 100)))
+                            lissage=meta.get("lissage", "moyen"), intensite=meta.get("intensite", 100),
+                            export_fps=int(meta.get("export_fps") or self.cfg().get("output_fps") or 30)))
         return out[:80]
 
     def next_face_name(self):
@@ -919,7 +943,8 @@ class Studio:
         return web.Response(text="ok")
 
     # ------------------------------------------------------------------ traitements (file d'attente)
-    JOB_LABEL = {"traiter": "Traitement", "taille": "Mise à la taille", "animer": "Animation du personnage"}
+    JOB_LABEL = {"traiter": "Traitement", "taille": "Mise à la taille", "animer": "Animation du personnage",
+                 "cadence": "Export"}
 
     async def enqueue(self, kind, take, args=(), label=None):
         take = safe_name(take)
@@ -950,6 +975,8 @@ class Studio:
             cmd = ["traiter", self.studio_dir, d]
         elif kind == "taille":
             cmd = ["taille", d, str(job["args"][0]), "--studio", self.studio_dir]
+        elif kind == "cadence":
+            cmd = ["cadence", d, str(job["args"][0]), "--studio", self.studio_dir]
         else:
             cmd = ["animer", self.studio_dir, d, job["args"][0]]
         cmd = [*self_command(), *cmd]
@@ -973,6 +1000,7 @@ class Studio:
         if rc == 0:
             lab = job["label"][:1].lower() + job["label"][1:]     # « animation de Y Bot »
             done = {"traiter": f"Prise {take} traitée", "taille": f"{take} : {lab} terminée",
+                    "cadence": f"{take} : {lab} terminé",
                     "animer": f"{take} : {lab} terminée", "visage": f"Visage {take} traité"}[kind]
             await self.toast(done, "ok")
         else:
@@ -1054,6 +1082,26 @@ class Studio:
         if not os.path.exists(p):
             raise web.HTTPNotFound()
         return web.FileResponse(p, headers={"Cache-Control": "no-store"})
+
+    async def handle_take_video(self, request):
+        """Vidéo d'une caméra de la prise, pour la revoir avant le traitement. Une copie légère en H.264
+        est faite la première fois (l'iPhone filme en HEVC, que la fenêtre ne lit pas toujours)."""
+        take = safe_name(request.match_info["take"])
+        d = os.path.join(self.captures_dir, take)
+        fn = os.path.basename(request.match_info["file"])
+        src = os.path.join(d, fn)
+        if not fn.lower().endswith((".mp4", ".mov")) or not os.path.isfile(src):
+            raise web.HTTPNotFound()
+        out = os.path.join(d, "mocapcam", "apercu", os.path.splitext(fn)[0] + ".mp4")
+        if not os.path.exists(out) or os.path.getmtime(out) < os.path.getmtime(src):
+            locks = self.__dict__.setdefault("_video_locks", {})
+            lock = locks.setdefault(out, asyncio.Lock())
+            async with lock:
+                if not os.path.exists(out) or os.path.getmtime(out) < os.path.getmtime(src):
+                    ok = await asyncio.get_running_loop().run_in_executor(None, make_preview_video, src, out)
+                    if not ok:
+                        return web.FileResponse(src, headers={"Cache-Control": "no-store"})
+        return web.FileResponse(out, headers={"Cache-Control": "no-store"})
 
     def open_folder(self, take=None, path=None):
         d = path or (os.path.join(self.captures_dir, safe_name(take)) if take else self.captures_dir)
@@ -1198,6 +1246,9 @@ class Studio:
                 kw["lissage"] = m["lissage"]
             if isinstance(m.get("intensite"), (int, float)):
                 kw["intensite"] = int(min(150, max(50, m["intensite"])))
+            if m.get("export_fps") in pipeline.EXPORT_FPS:
+                kw["export_fps"] = int(m["export_fps"])
+                self.save_cfg_value("output_fps", kw["export_fps"])
             facemod.write_meta(d, **kw)
             if m.get("apply"):
                 await self.enqueue_face("visage", name)
@@ -1289,6 +1340,28 @@ class Studio:
             self.changed()
         elif a == "process":
             await self.enqueue("traiter", m.get("take"))
+        elif a == "take_fps":
+            take = safe_name(m.get("take"))
+            d = os.path.join(self.captures_dir, take)
+            try:
+                v = int(m.get("fps"))
+                if v not in pipeline.EXPORT_FPS:
+                    raise ValueError
+            except (TypeError, ValueError):
+                await self.toast("Cadence : 24, 30 ou 60 images/s", "error")
+                return
+            if not os.path.isdir(d):
+                return
+            self.save_cfg_value("output_fps", v)          # devient la cadence des prochaines prises
+            if os.path.exists(os.path.join(d, "mocapcam", f"{take}.mocap.json")):
+                await self.enqueue("cadence", take, [v], label=f"Export à {v} images/s")
+            else:
+                meta = pipeline.load_take_meta(d) or {}
+                meta["export_fps"] = v
+                with open(os.path.join(d, "take.json"), "w", encoding="utf-8") as f:
+                    json.dump(meta, f, indent=2, ensure_ascii=False)
+                await self.toast(f"{take} : sera exportée à {v} images/s", "ok")
+            self.changed()
         elif a == "cancel_queue":
             self.queue = [j for j in self.queue if j["take"] != m.get("take")]
             self.changed()
@@ -1439,6 +1512,7 @@ class Studio:
         app.router.add_post("/character", self.handle_character_upload)
         app.router.add_get("/character/{cid}/apercu.glb", self.handle_character_glb)
         app.router.add_get("/take/{take}/apercu.glb", self.handle_take_glb)
+        app.router.add_get("/take/{take}/video/{file}", self.handle_take_video)
         for img in ("logo-mocam.png", "favicon.png", "mocam.ico", "i18n.js"):
             app.router.add_get("/" + img, lambda r, img=img: web.FileResponse(
                 os.path.join(UI_DIR, img), headers={"Cache-Control": "max-age=3600"}))

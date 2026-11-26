@@ -560,6 +560,67 @@ def _load_positions(data):
     return np.array([[[np.nan] * 3 if p is None else p for p in fr] for fr in data["positions"]], float)
 
 
+EXPORT_FPS = (24, 30, 60)
+
+
+def take_export_fps(take_dir, cfg=None):
+    """Cadence des FBX de la prise : celle choisie pour la prise (take.json), sinon celle du Studio."""
+    meta = load_take_meta(take_dir) or {}
+    v = meta.get("export_fps") or (cfg or {}).get("output_fps") or DEFAULT_STUDIO.get("output_fps", 30)
+    return int(v)
+
+
+def export_skeleton_fbx(take_dir, mocap_json, export_fps=None, blender=None, log=print):
+    """FBX du squelette seul (<prise>.fbx) à la cadence voulue. La capture (.mocap.json) garde sa
+    cadence d'origine : elle est rééchantillonnée dans un fichier à part pour l'export."""
+    name = os.path.basename(os.path.normpath(take_dir))
+    src = mocap_json
+    if export_fps:
+        with open(mocap_json, encoding="utf-8") as f:
+            data = json.load(f)
+        fps = float(data["fps"])
+        if abs(fps - export_fps) > 1e-6:
+            X, fps2 = triangulate.resample_frames(_load_positions(data), fps, float(export_fps))
+            data["positions"] = [[None if not np.isfinite(p).all() else [round(float(v), 4) for v in p]
+                                  for p in frame] for frame in X]
+            data["fps"], data["frame_count"] = fps2, int(X.shape[0])
+            d = os.path.join(take_dir, "mocapcam", "export")
+            os.makedirs(d, exist_ok=True)
+            src = os.path.join(d, f"{name}.mocap.json")        # même nom : même nom d'animation
+            with open(src, "w", encoding="utf-8") as f:
+                json.dump(data, f, separators=(",", ":"), default=_jsonable)
+        log(f"  FBX exporté à {int(export_fps)} images/s")
+    return fbx.export(src, os.path.join(take_dir, f"{name}.fbx"), blender=blender, log=log)
+
+
+def set_export_fps(take_dir, fps, studio_dir=None, blender=None, log=print):
+    """Change la cadence des FBX d'une prise : enregistrée dans take.json ; si la prise est déjà
+    traitée, son FBX et ceux des personnages animés sont refaits, sans retraiter."""
+    fps = int(fps)
+    if fps not in EXPORT_FPS:
+        raise ValueError("cadence : 24, 30 ou 60 images/s")
+    name = os.path.basename(os.path.normpath(take_dir))
+    meta_path = os.path.join(take_dir, "take.json")
+    meta = load_take_meta(take_dir) or {}
+    meta["export_fps"] = fps
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2, ensure_ascii=False)
+    path = os.path.join(take_dir, "mocapcam", f"{name}.mocap.json")
+    if not os.path.exists(path):
+        log(f"{name} : sera exportée à {fps} images/s")
+        return None
+    cfg = load_studio(studio_dir) if studio_dir else {}
+    bl = blender or cfg.get("blender") or None
+    log(f"{name} : export à {fps} images/s")
+    out = export_skeleton_fbx(take_dir, path, fps, blender=bl, log=log)
+    for cid in (_animated_characters(take_dir, studio_dir) if studio_dir else []):
+        try:
+            animate_character(take_dir, studio_dir, cid, log=log, blender=bl)
+        except (RuntimeError, FileNotFoundError) as e:
+            log(f"  {cid} : {e}")
+    return out
+
+
 def rescale_take(take_dir, height_cm, blender=None, log=print, studio_dir=None):
     """Met une prise déjà traitée à la taille indiquée (cm), sans refaire le traitement,
     puis recrée son FBX. Retourne le chemin du FBX (ou de la capture si pas de Blender)."""
@@ -614,8 +675,8 @@ def rescale_take(take_dir, height_cm, blender=None, log=print, studio_dir=None):
     if blender is not False:
         cfg = load_studio(studio_dir) if studio_dir else {}
         chars = _animated_characters(take_dir, studio_dir) if studio_dir else []
-        out = fbx.export(path, os.path.join(take_dir, f"{name}.fbx"),
-                         blender=blender or cfg.get("blender") or None, log=log) or path
+        out = export_skeleton_fbx(take_dir, path, take_export_fps(take_dir, cfg),
+                                  blender=blender or cfg.get("blender") or None, log=log) or path
         for cid in chars:          # personnages déjà animés avec cette prise : refaits à la bonne taille
             try:
                 animate_character(take_dir, studio_dir, cid, log=log, blender=blender or cfg.get("blender") or None)
@@ -738,11 +799,7 @@ def process_take(studio_dir, take_dir, force=False, manual_delays=None, only_cal
                 cfg = dict(cfg, markers=mk_rot)
                 log(f"  acteur tourné de {turn:+.0f}° : il regarde vers l'avant de Blender (-Y)")
             stats["front_rotation_deg"] = round(turn, 1)
-    out_fps = cfg.get("output_fps") or fps
-    if abs(out_fps - fps) > 1e-6:
-        X, fps = triangulate.resample_frames(X, fps, out_fps)
-        log(f"  animation exportée à {fps:g} i/s")
-    stats["output_fps"] = fps
+    stats["capture_fps"] = fps       # la capture garde sa cadence ; le FBX est rééchantillonné
     name = os.path.basename(os.path.normpath(take_dir))
     # points 3D bruts : données de travail (dans mocapcam/), d'où est tiré le FBX
     out = export_motion(os.path.join(work, f"{name}.mocap.json"), X, fps, cams, cfg, vol, stats)
@@ -753,8 +810,8 @@ def process_take(studio_dir, take_dir, force=False, manual_delays=None, only_cal
         json.dump(stats, f, indent=2, default=_jsonable)
     result = out
     if cfg.get("fbx", True):
-        result = fbx.export(out, os.path.join(take_dir, f"{name}.fbx"),
-                            blender=cfg.get("blender") or None, log=log) or out
+        result = export_skeleton_fbx(take_dir, out, take_export_fps(take_dir, cfg),
+                                     blender=cfg.get("blender") or None, log=log) or out
     cid = default_character(studio_dir, cfg)
     if cid and result.endswith(".fbx"):
         try:

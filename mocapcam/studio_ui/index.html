@@ -184,6 +184,11 @@
   .detail .sub { color: var(--muted); margin-top: 4px; }
   .grid2 { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); gap: 18px; align-items: start; }
   .panel { background: var(--ink-1); border: 1px solid var(--line); border-radius: var(--r-panel); padding: 16px; display: grid; gap: 12px; }
+  /* vidéos envoyées par les caméras, à revoir avant le traitement */
+  .vids { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; aspect-ratio: 16 / 10; align-content: center; background: var(--ink-0); border-radius: var(--r-view); padding: 10px; overflow: auto; }
+  .vids figure { margin: 0; display: grid; gap: 6px; }
+  .vids video { width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 8px; }
+  .vids figcaption { font-size: 12px; color: var(--muted); }
   .viewer { position: relative; aspect-ratio: 16 / 10; background: radial-gradient(ellipse at 50% 35%, #232a36 0%, #151920 70%); border-radius: var(--r-view); overflow: hidden; }
   .viewer canvas { display: block; width: 100% !important; height: 100% !important; }
   .viewer .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); text-align: center; padding: 20px; }
@@ -493,7 +498,7 @@ function setLang(l) { try { localStorage.setItem('mocam-lang', l); } catch (e) {
 <script>
 let ws, S = null, serverDelta = 0, takeTyped = false, selTake = null, logText = '';
 const autoAnimated = new Set();   // prises où le personnage par défaut a été lancé automatiquement
-const UI_VERSION = '1.14.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
+const UI_VERSION = '1.15.0';   // doit correspondre à STUDIO_VERSION (studio_server.py)
 function newerVersion(a, b) {
   const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
   for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
@@ -786,7 +791,30 @@ function deleteTake(n) {
 window.deleteTake = deleteTake;
 window.selectTake = selectTake;
 
-let detailKey = '', viewerSel = null;
+let detailKey = '', viewerSel = null, takeView = null;   // takeView : { take, mode: '3d' | 'videos' }
+function setTakeView(take, mode) {
+  takeView = { take, mode };
+  const v = $('vidBox'), w = $('viewerBox'), pb = $('playerBar');
+  if (v) v.hidden = mode !== 'videos';
+  if (w) w.style.display = mode === 'videos' ? 'none' : '';
+  if (pb) pb.dataset.hide = mode === 'videos' ? '1' : '';
+  if (pb) pb.style.display = mode === 'videos' || pb.dataset.nosrc ? 'none' : '';
+  document.querySelectorAll('#viewSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === mode));
+  if ($('vidAll')) $('vidAll').hidden = mode !== 'videos';
+  if (mode === '3d') window.dispatchEvent(new Event('resize'));
+  if (mode === 'videos') { const nb = $('vidBox'); if (nb && !nb.dataset.loaded) loadTakeVideos(nb); }
+  else document.querySelectorAll('#vidBox video').forEach(x => x.pause());
+}
+function loadTakeVideos(box) {
+  box.dataset.loaded = '1';
+  box.querySelectorAll('video[data-src]').forEach(v => { v.src = v.dataset.src; v.preload = 'metadata'; });
+}
+function playAllVideos() {
+  const vs = [...document.querySelectorAll('#vidBox video')];
+  const playing = vs.some(v => !v.paused);
+  vs.forEach(v => { if (playing) v.pause(); else { v.currentTime = 0; v.play().catch(() => {}); } });
+}
+window.setTakeView = setTakeView; window.playAllVideos = playAllVideos;
 function renderTakeDetail(force) {
   const t = S.takes.find(x => x.name === selTake);
   const P = S.processing;
@@ -798,6 +826,8 @@ function renderTakeDetail(force) {
   const box = $('takeDetail');
   const oldBox = $('viewerBox');
   if (oldBox) oldBox.remove();
+  const oldVids = $('vidBox');
+  if (oldVids) oldVids.remove();
   if (!t) { box.innerHTML = '<div class="empty-page">Les prises filmées apparaissent ici.</div>'; return; }
   const chars = S.characters.filter(c => !(c.info && c.info.face_only));   // têtes seules : pas de squelette à animer
   const animated = chars.filter(c => t.characters.includes(c.id));
@@ -817,6 +847,8 @@ function renderTakeDetail(force) {
   }
   const stepsHtml = running && P.kind === 'traiter' ? `<div class="steps">${STEPS.map((s, i) => `<div class="step ${i + 1 < P.step ? 'done' : i + 1 === P.step ? 'cur' : ''}"><span class="n">${i + 1}</span><span>${s}</span></div>`).join('')}</div>` : '';
   const hVal = t.height_cm ?? '';
+  if (!takeView || takeView.take !== t.name) takeView = { take: t.name, mode: t.preview ? '3d' : 'videos' };
+  const vmode = t.videos.length ? takeView.mode : '3d';
   box.innerHTML = `
     <div class="take-head">
       <div>
@@ -830,8 +862,10 @@ function renderTakeDetail(force) {
     </div>
     <div class="grid2">
       <div class="panel">
-        <div class="viewer" id="viewerBox" data-take="${esc(t.name)}" data-src="${esc(viewerSel.id)}"><div class="empty" id="viewerEmpty">${!t.preview ? 'L\'aperçu 3D apparaît une fois la prise traitée.' : sources.length ? 'Chargement de l\'aperçu…' : defMissing && (busy || S.blender) ? `${esc(defChar.name)} en préparation…` : 'Aucun personnage animé sur cette prise : choisissez-en un dans Animer un personnage.'}</div></div>
-        <div class="player" id="playerBar" style="${t.preview && sources.length ? '' : 'display:none'}">
+        ${t.videos.length ? `<div class="row" style="align-items:center;justify-content:space-between"><span class="seg" id="viewSeg"><button data-mode="videos" aria-pressed="${vmode === 'videos'}" onclick="setTakeView('${esc(t.name)}','videos')">Vidéos des caméras</button><button data-mode="3d" aria-pressed="${vmode === '3d'}" onclick="setTakeView('${esc(t.name)}','3d')">Aperçu 3D</button></span>${t.videos.length > 1 ? `<button class="btn small" onclick="playAllVideos()" ${vmode === 'videos' ? '' : 'hidden'} id="vidAll">Lire toutes les vidéos</button>` : ''}</div>` : ''}
+        <div class="vids" id="vidBox" data-take="${esc(t.name)}" ${vmode === 'videos' ? '' : 'hidden'}>${t.videos.map(v => `<figure><video controls playsinline preload="none" data-src="/take/${encodeURIComponent(t.name)}/video/${encodeURIComponent(v)}"></video><figcaption>${esc(v)}</figcaption></figure>`).join('')}</div>
+        <div class="viewer" id="viewerBox" style="${vmode === 'videos' ? 'display:none' : ''}" data-take="${esc(t.name)}" data-src="${esc(viewerSel.id)}"><div class="empty" id="viewerEmpty">${!t.preview ? 'L\'aperçu 3D apparaît une fois la prise traitée.' : sources.length ? 'Chargement de l\'aperçu…' : defMissing && (busy || S.blender) ? `${esc(defChar.name)} en préparation…` : 'Aucun personnage animé sur cette prise : choisissez-en un dans Animer un personnage.'}</div></div>
+        <div class="player" id="playerBar" ${t.preview && sources.length ? '' : 'data-nosrc="1"'} style="${t.preview && sources.length && vmode !== 'videos' ? '' : 'display:none'}">
           <button class="btn small" id="vPlay">Pause</button>
           <input type="range" id="vScrub" min="0" max="1000" value="0" aria-label="Position dans la prise">
           <span class="time" id="vTime"></span>
@@ -842,6 +876,8 @@ function renderTakeDetail(force) {
         <div class="panel">
           <div class="side-h">Traitement</div>
           ${running ? (P.kind === 'traiter' ? `<div class="hint">En cours${P.step ? ` : étape ${P.step} sur 6` : '…'} — vous pouvez filmer pendant ce temps.</div>${stepsHtml}` : `<div>${esc(P.label)}…</div>`) : queued ? '<div class="hint">En attente d\'un autre traitement…</div>' : t.processed ? `<div class="ok-t">Prise traitée${t.measured_cm ? `, acteur de ${fr(t.measured_cm, 0)} cm` : ''}</div>` : `<div class="hint">${t.videos.length < 2 ? 'Il faut les vidéos d\'au moins deux caméras.' : 'Compte 5 à 8 minutes par prise. Vous pouvez filmer pendant ce temps.'}</div>`}
+          <div class="row" style="align-items:center"><span class="hint" style="min-width:120px">Images/s du FBX</span><span class="seg">${[24, 30, 60].map(v => `<button aria-pressed="${t.export_fps === v}" ${busy ? 'disabled' : ''} onclick="send({a:'take_fps',take:'${esc(t.name)}',fps:${v}})">${v}</button>`).join('')}</span></div>
+          ${t.processed ? '<p class="hint" style="margin:0">Changer la cadence refait les FBX en quelques secondes, sans retraiter.</p>' : ''}
           <div class="row">
             <button class="btn ${t.processed ? '' : 'primary'}" ${busy || t.videos.length < 2 ? 'disabled' : ''} onclick="send({a:'process',take:'${esc(t.name)}'})">${t.processed ? 'Retraiter' : 'Traiter la prise'}</button>
             ${queued ? `<button class="btn" onclick="send({a:'cancel_queue',take:'${esc(t.name)}'})">Retirer de la file</button>` : ''}
@@ -876,7 +912,14 @@ function renderTakeDetail(force) {
   const l = $('log'); l.textContent = logText || 'Les messages du traitement s\'affichent ici.'; l.scrollTop = l.scrollHeight;
   // l'aperçu 3D déjà affiché pour cette prise est gardé tel quel (pas de rechargement)
   const nb = $('viewerBox');
-  if (oldBox && nb && oldBox.dataset.take === nb.dataset.take && oldBox.dataset.src === nb.dataset.src && oldBox.querySelector('canvas')) nb.replaceWith(oldBox);
+  if (oldBox && nb && oldBox.dataset.take === nb.dataset.take && oldBox.dataset.src === nb.dataset.src && oldBox.querySelector('canvas')) {
+    oldBox.style.display = nb.style.display;
+    nb.replaceWith(oldBox);
+  }
+  // les vidéos en cours de lecture sont gardées telles quelles
+  const nv = $('vidBox');
+  if (oldVids && nv && oldVids.dataset.take === nv.dataset.take && oldVids.dataset.loaded) { oldVids.hidden = nv.hidden; nv.replaceWith(oldVids); }
+  else if (nv && !nv.hidden) loadTakeVideos(nv);
   window.mcViewer.show(t.preview && viewerSel.id ? viewerSel : null);
 }
 function applyTakeHeight(take) {
@@ -1096,6 +1139,7 @@ function renderFaceDetail(force) {
           <div class="side-h">Réglages</div>
           <div class="row" style="align-items:center"><span class="hint" style="min-width:90px">Lissage</span><span class="seg">${['faible', 'moyen', 'fort'].map(l => `<button aria-pressed="${f.lissage === l}" onclick="faceSet('${esc(f.name)}', {lissage:'${l}'})">${l[0].toUpperCase() + l.slice(1)}</button>`).join('')}</span></div>
           <div class="row" style="align-items:center"><span class="hint" style="min-width:90px">Intensité</span><input type="range" min="50" max="150" step="5" value="${f.intensite}" style="flex:1; accent-color: var(--act)" oninput="this.nextElementSibling.textContent=this.value+' %'" onchange="faceSet('${esc(f.name)}', {intensite:+this.value})"><span class="hint" style="min-width:48px">${f.intensite} %</span></div>
+          <div class="row" style="align-items:center"><span class="hint" style="min-width:90px">Images/s</span><span class="seg">${[24, 30, 60].map(v => `<button aria-pressed="${f.export_fps === v}" onclick="faceSet('${esc(f.name)}', {export_fps:${v}})">${v}</button>`).join('')}</span></div>
           <p class="hint" style="margin:0">Faible : plus de détails, un peu plus de bruit. Fort : très doux. Un changement refait les courbes en quelques secondes, sans refaire le suivi.</p>
         </div>
         <div class="panel">

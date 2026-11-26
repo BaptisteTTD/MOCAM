@@ -5,6 +5,10 @@
 //   frags    : derniers recours, morceaux remplacés dans un texte non reconnu
 window.MOCAM_I18N = {
 exact: {
+  // ------------------------------------------------------------ prises : vidéos et cadence
+  'Vidéos des caméras': 'Camera videos', 'Aperçu 3D': '3D preview', 'Lire toutes les vidéos': 'Play all videos',
+  'Images/s du FBX': 'FBX frames/s', 'Images/s': 'Frames/s',
+  'Changer la cadence refait les FBX en quelques secondes, sans retraiter.': 'Changing the frame rate redoes the FBX files in a few seconds, without reprocessing.',
   // ------------------------------------------------------------ schéma des boules au sol
   'Placer les boules au sol': 'Placing the floor balls', 'Vue de dessus': 'Top view',
   'Schéma vu de dessus : boules au sol, acteur et caméras': 'Top-view diagram: floor balls, actor and cameras',

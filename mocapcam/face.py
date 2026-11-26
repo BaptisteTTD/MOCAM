@@ -600,7 +600,7 @@ def write_meta(face_dir, **kw):
     return m
 
 
-def run(face_dir, studio_dir=None, blender=None, log=print, retrack=False, output_fps=30):
+def run(face_dir, studio_dir=None, blender=None, log=print, retrack=False, output_fps=None):
     """Traitement complet d'une prise de visage (étapes « N/3 » pour MOCAM Studio). La tête reste
     fixe et la vidéo est lue telle quelle (non inversée) : seules les expressions sont animées."""
     from . import fbx as fbxmod
@@ -609,6 +609,15 @@ def run(face_dir, studio_dir=None, blender=None, log=print, retrack=False, outpu
     lissage = meta.get("lissage", "moyen")
     intensite = float(meta.get("intensite", 100)) / 100.0
     miroir = False
+    if output_fps is None:                       # cadence du FBX : réglage de la prise, sinon du Studio
+        output_fps = meta.get("export_fps")
+        if not output_fps and studio_dir:
+            try:
+                from .pipeline import load_studio
+                output_fps = load_studio(studio_dir).get("output_fps")
+            except (OSError, ValueError):
+                output_fps = None
+        output_fps = float(output_fps or 30)
     video = find_video(face_dir)
     if not video:
         raise RuntimeError("pas de vidéo dans ce dossier")
