@@ -249,6 +249,8 @@ ajoutée.
 ![Réglages](docs/tuto/10_reglages.png)
 
 * **Priorité à 60 images/s** : si un téléphone n'y arrive pas en 1080p, il passe en 720p.
+  Les téléphones filment à 60 images/s pour un suivi précis ; les animations exportées (FBX du
+  corps et du visage) sont à **30 images/s**.
 * **Aperçu des caméras** : cadence des images en direct (à baisser si le Wi-Fi est faible).
 * **Réseau** : les adresses du PC, le bouton pare-feu, et **Nouveau QR code** : les téléphones
   déjà connectés le restent, les autres devront scanner le nouveau code.
@@ -312,7 +314,7 @@ Dans `captures\prise_XXX\` :
 | Fichier | Contenu |
 |---|---|
 | `prise_XXX_mocam_bot.fbx` | MOCAM Bot (ou votre personnage) animé, maillage compris |
-| `prise_XXX.fbx` | le squelette seul : 65 os Mixamo, proportions de l'acteur, corps et doigts, 60 images/s, pose de repos en T-pose |
+| `prise_XXX.fbx` | le squelette seul : 65 os Mixamo, proportions de l'acteur, corps et doigts, 30 images/s, pose de repos en T-pose |
 
 Le squelette seul est l'équivalent d'une animation Mixamo téléchargée « sans skin ». Tout outil
 qui accepte les animations Mixamo sait l'utiliser.

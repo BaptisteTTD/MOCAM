@@ -17,6 +17,7 @@ from .skeleton import INDEX, JOINT_NAMES
 DEFAULT_STUDIO = {
     "cameras": ["iphone", "poco"],
     "fps": 60,
+    "output_fps": 30,     # cadence des animations exportées (FBX corps et visage)
     "max_height": 1080,
     "marker_height": 0.01,
     "markers": [
@@ -350,7 +351,7 @@ def export_motion(path, X, fps, cams, cfg, vol, stats):
         "format": "mocapcam", "version": 1, "fps": fps, "units": "m", "up": "Z",
         "joint_names": JOINT_NAMES, "frame_count": int(X.shape[0]),
         # temps (s) de la première image, par rapport au début de la vidéo de référence
-        "start_time_s": round(stats.get("first_frame", 0) / fps, 4),
+        "start_time_s": stats.get("start_time_s", round(stats.get("first_frame", 0) / fps, 4)),
         "positions": pos,
         "cameras": [dict(name=c["name"], K=np.asarray(c["K"]).tolist(),
                          dist=np.asarray(c["dist"]).ravel().tolist(), width=c["width"],
@@ -684,6 +685,12 @@ def process_take(studio_dir, take_dir, force=False, manual_delays=None, only_cal
             log("  ATTENTION : taille peu plausible. Indiquez la taille de l'acteur en cm dans "
                 "MOCAM Studio : le squelette sera mis à la bonne taille.")
     stats["actor_height_m"] = h
+    stats["start_time_s"] = round(first / fps, 4)
+    out_fps = cfg.get("output_fps") or fps
+    if abs(out_fps - fps) > 1e-6:
+        X, fps = triangulate.resample_frames(X, fps, out_fps)
+        log(f"  animation exportée à {fps:g} i/s")
+    stats["output_fps"] = fps
     name = os.path.basename(os.path.normpath(take_dir))
     # points 3D bruts : données de travail (dans mocapcam/), d'où est tiré le FBX
     out = export_motion(os.path.join(work, f"{name}.mocap.json"), X, fps, cams, cfg, vol, stats)

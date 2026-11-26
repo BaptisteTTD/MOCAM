@@ -600,7 +600,7 @@ def write_meta(face_dir, **kw):
     return m
 
 
-def run(face_dir, studio_dir=None, blender=None, log=print, retrack=False):
+def run(face_dir, studio_dir=None, blender=None, log=print, retrack=False, output_fps=30):
     """Traitement complet d'une prise de visage (étapes « N/3 » pour MOCAM Studio). La tête reste
     fixe et la vidéo est lue telle quelle (non inversée) : seules les expressions sont animées."""
     from . import fbx as fbxmod
@@ -647,7 +647,15 @@ def run(face_dir, studio_dir=None, blender=None, log=print, retrack=False):
     head = np.zeros_like(head)               # tête toujours fixe
     move = np.zeros_like(move)
     neutral, delta, tris = learn_face(raw, W, miroir)
-    data = dict(fps=raw["fps"], frames=n, names=ARKIT, weights=np.round(W, 4).tolist(),
+    fps_out = raw["fps"]
+    if output_fps and abs(output_fps - fps_out) > 1e-6:      # animation exportée à 30 i/s
+        from .triangulate import resample_frames
+        W, _ = resample_frames(W, fps_out, output_fps)
+        head, _ = resample_frames(head, fps_out, output_fps)
+        move, fps_out = resample_frames(move, fps_out, output_fps)
+        n = len(W)
+        log(f"    animation exportée à {fps_out:g} i/s")
+    data = dict(fps=fps_out, frames=n, names=ARKIT, weights=np.round(W, 4).tolist(),
                 head=np.round(head, 3).tolist(), move_cm=np.round(move, 3).tolist(), rest=rest,
                 found=found, lissage=lissage, intensite=round(intensite * 100), tete=False,
                 face=dict(vertices=np.round(neutral, 5).tolist(), triangles=tris,
@@ -663,7 +671,7 @@ def run(face_dir, studio_dir=None, blender=None, log=print, retrack=False):
     res = fbxmod.face_export(out["json"], out["fbx"], out["glb"], blender=blender, log=log)
     if not res:
         log("    FBX non créé : Blender est introuvable")
-    write_meta(face_dir, processed=time.strftime("%Y-%m-%d %H:%M:%S"), frames=n, fps=raw["fps"])
+    write_meta(face_dir, processed=time.strftime("%Y-%m-%d %H:%M:%S"), frames=n, fps=fps_out)
     log("Terminé")
     return out
 

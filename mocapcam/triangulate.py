@@ -374,6 +374,26 @@ def _centroid(kp, sc, thr=0.3):
     return kp[ok].mean(0)
 
 
+def resample_frames(X, fps_src, fps_dst):
+    """Rééchantillonne une suite d'images (T, ...) de fps_src vers fps_dst par interpolation
+    linéaire. Une valeur manquante (NaN) n'est interpolée que si ses deux voisines existent.
+    Renvoie (X, fps_dst) ; inchangé si les cadences sont égales."""
+    X = np.asarray(X, float)
+    if not fps_dst or abs(fps_src - fps_dst) < 1e-6 or X.shape[0] < 2:
+        return X, fps_src
+    T = X.shape[0]
+    n = int(np.floor((T - 1) * fps_dst / fps_src + 1e-9)) + 1
+    t = np.arange(n) * (fps_src / fps_dst)              # positions dans les images source
+    i0 = np.clip(np.floor(t).astype(int), 0, T - 1)
+    i1 = np.clip(i0 + 1, 0, T - 1)
+    w = (t - i0).reshape((-1,) + (1,) * (X.ndim - 1))
+    a, b = X[i0], X[i1]
+    out = a * (1 - w) + b * w
+    exact = (w < 1e-9)
+    out = np.where(exact & np.isfinite(a), a, out)       # image source exacte : pas de mélange
+    return out, float(fps_dst)
+
+
 def resample_pose(pose, fps_src, fps_dst, delay, T_dst, match_px=150.0):
     """Ramène les points 2D d'une caméra sur la base de temps commune (fps_dst), en tenant
     compte de son décalage (delay, s) : un événement au temps t de la référence apparaît au
